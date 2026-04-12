@@ -1,5 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
+} from 'recharts';
+import { 
   Calendar, 
   CheckCircle2, 
   Circle, 
@@ -12,10 +16,20 @@ import {
   LogOut,
   User,
   Lock,
-  Flame
+  Flame,
+  Play,
+  Pause,
+  RotateCcw,
+  BarChart,
+  Activity
 } from 'lucide-react';
 
 // --- Types ---
+interface MockTest {
+  id: string;
+  date: string;
+  score: number;
+}
 type Subject = 'Physics' | 'Chemistry' | 'Mathematics';
 
 interface Chapter {
@@ -70,9 +84,16 @@ export default function App() {
 
   // --- App State ---
   const [chapters, setChapters] = useState<Chapter[]>(INITIAL_CHAPTERS);
-  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests'>('plan');
   const [dailyPlan, setDailyPlan] = useState<{date: string, chapterIds: string[]}>({ date: '', chapterIds: [] });
   const [streak, setStreak] = useState<{count: number, lastActivityDate: string}>({ count: 0, lastActivityDate: '' });
+  const [mockTests, setMockTests] = useState<MockTest[]>([]);
+  const [activityLog, setActivityLog] = useState<Record<string, number>>({});
+  
+  // Pomodoro State
+  const [timerTime, setTimerTime] = useState(25 * 60);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [timerMode, setTimerMode] = useState<'work' | 'break'>('work');
 
   // --- Persistence Effects ---
   
@@ -88,9 +109,9 @@ export default function App() {
   // 2. Save user data whenever chapters change
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak }));
+      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog }));
     }
-  }, [chapters, dailyPlan, streak, currentUser]);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, currentUser]);
 
   const loadUserData = (user: string) => {
     const data = localStorage.getItem(`jee_data_${user}`);
@@ -101,10 +122,14 @@ export default function App() {
           setChapters(parsed);
           setDailyPlan({ date: '', chapterIds: [] });
           setStreak({ count: 0, lastActivityDate: '' });
+          setMockTests([]);
+          setActivityLog({});
         } else {
           setChapters(parsed.chapters || INITIAL_CHAPTERS);
           setDailyPlan(parsed.dailyPlan || { date: '', chapterIds: [] });
           setStreak(parsed.streak || { count: 0, lastActivityDate: '' });
+          setMockTests(parsed.mockTests || []);
+          setActivityLog(parsed.activityLog || {});
         }
       } catch (e) {
         setChapters(INITIAL_CHAPTERS);
@@ -113,6 +138,8 @@ export default function App() {
       setChapters(INITIAL_CHAPTERS);
       setDailyPlan({ date: '', chapterIds: [] });
       setStreak({ count: 0, lastActivityDate: '' });
+      setMockTests([]);
+      setActivityLog({});
     }
   };
 
@@ -161,6 +188,9 @@ export default function App() {
     setChapters(INITIAL_CHAPTERS); // Reset to default state for next user
     setDailyPlan({ date: '', chapterIds: [] });
     setStreak({ count: 0, lastActivityDate: '' });
+    setMockTests([]);
+    setActivityLog({});
+    setIsTimerRunning(false);
   }, []);
 
   // --- Dates ---
@@ -240,6 +270,76 @@ export default function App() {
   const totalCompleted = chapters.filter(c => c.completed).length;
   const overallProgress = Math.round((totalCompleted / chapters.length) * 100);
 
+  const getSubjectProgress = (subject: Subject) => {
+    const subChapters = chapters.filter(c => c.subject === subject);
+    const completed = subChapters.filter(c => c.completed).length;
+    return { completed, total: subChapters.length, percentage: Math.round((completed / subChapters.length) * 100) };
+  };
+
+  // --- Chart Data ---
+  const last30Days = useMemo(() => {
+    return Array.from({ length: 30 }).map((_, i) => {
+      const d = new Date(todayDateObj);
+      d.setDate(d.getDate() - (29 - i));
+      return d.toISOString().split('T')[0];
+    });
+  }, [todayDateObj]);
+
+  const radarData = useMemo(() => {
+    return (['Physics', 'Chemistry', 'Mathematics'] as Subject[]).map(sub => {
+      const prog = getSubjectProgress(sub);
+      return {
+        subject: sub,
+        completion: prog.percentage,
+        fullMark: 100,
+      };
+    });
+  }, [chapters]);
+
+  const testChartData = useMemo(() => {
+    return [...mockTests].reverse().map((t, index) => ({
+      name: `Test ${index + 1}`,
+      score: t.score,
+      date: new Date(t.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    }));
+  }, [mockTests]);
+
+  // Timer Logic
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isTimerRunning && timerTime > 0) {
+      interval = setInterval(() => setTimerTime(prev => prev - 1), 1000);
+    } else if (timerTime === 0 && isTimerRunning) {
+      setIsTimerRunning(false);
+      // Auto-switch mode
+      if (timerMode === 'work') {
+        setTimerMode('break');
+        setTimerTime(5 * 60);
+      } else {
+        setTimerMode('work');
+        setTimerTime(25 * 60);
+      }
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning, timerTime, timerMode]);
+
+  const toggleTimer = () => setIsTimerRunning(!isTimerRunning);
+  const resetTimer = () => {
+    setIsTimerRunning(false);
+    setTimerTime(timerMode === 'work' ? 25 * 60 : 5 * 60);
+  };
+  const switchTimerMode = (mode: 'work' | 'break') => {
+    setIsTimerRunning(false);
+    setTimerMode(mode);
+    setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   // --- Handlers ---
   const toggleChapter = useCallback((id: string) => {
     setChapters(prev => {
@@ -248,23 +348,36 @@ export default function App() {
       );
       
       const chapter = prev.find(c => c.id === id);
-      if (chapter && !chapter.completed) {
-        // Marking as completed
-        setStreak(prevStreak => {
-          if (prevStreak.lastActivityDate === todayStr) {
-            return prevStreak;
-          }
-          
-          const yesterday = new Date(todayDateObj);
-          yesterday.setDate(yesterday.getDate() - 1);
-          const yesterdayStr = yesterday.toISOString().split('T')[0];
-          
-          if (prevStreak.lastActivityDate === yesterdayStr) {
-            return { count: prevStreak.count + 1, lastActivityDate: todayStr };
-          } else {
-            return { count: 1, lastActivityDate: todayStr };
-          }
-        });
+      if (chapter) {
+        if (!chapter.completed) {
+          // Marking as completed
+          setActivityLog(prevLog => ({
+            ...prevLog,
+            [todayStr]: (prevLog[todayStr] || 0) + 1
+          }));
+
+          setStreak(prevStreak => {
+            if (prevStreak.lastActivityDate === todayStr) {
+              return prevStreak;
+            }
+            
+            const yesterday = new Date(todayDateObj);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayStr = yesterday.toISOString().split('T')[0];
+            
+            if (prevStreak.lastActivityDate === yesterdayStr) {
+              return { count: prevStreak.count + 1, lastActivityDate: todayStr };
+            } else {
+              return { count: 1, lastActivityDate: todayStr };
+            }
+          });
+        } else {
+          // Unmarking as completed
+          setActivityLog(prevLog => ({
+            ...prevLog,
+            [todayStr]: Math.max(0, (prevLog[todayStr] || 0) - 1)
+          }));
+        }
       }
       
       return newChapters;
@@ -289,69 +402,71 @@ export default function App() {
   // --- Auth Screen ---
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans text-slate-900">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 w-full max-w-md">
+      <div className="min-h-screen bg-[#fdfcff] flex items-center justify-center p-4 font-sans text-slate-900">
+        <div className="bg-[#ece6f0] rounded-[28px] p-8 w-full max-w-md">
           <div className="flex justify-center mb-6">
-            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center border border-indigo-100">
-              <Target className="w-6 h-6 text-indigo-600" />
+            <div className="w-16 h-16 bg-[#d0bcff] rounded-full flex items-center justify-center">
+              <Target className="w-8 h-8 text-[#381e72]" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-center mb-2">JEE Smart Planner</h1>
-          <p className="text-slate-500 text-center mb-8">
+          <h1 className="text-2xl font-normal text-center mb-2 text-[#1c1b1f]">JEE Smart Planner</h1>
+          <p className="text-[#49454f] text-center mb-8">
             {authMode === 'login' ? 'Welcome back! Log in to continue.' : 'Create an account to save your progress.'}
           </p>
 
           <form onSubmit={handleAuth} className="space-y-4">
             {authError && (
-              <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm font-medium text-center">
+              <div className="bg-[#f2b8b5] text-[#601410] p-3 rounded-2xl text-sm font-medium text-center">
                 {authError}
               </div>
             )}
             
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
-              <div className="relative">
-                <User className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <div className="relative bg-[#e7e0ec] rounded-t-xl border-b-2 border-[#49454f] focus-within:border-[#6750a4] transition-colors">
+                <User className="w-5 h-5 text-[#49454f] absolute left-4 top-1/2 -translate-y-1/2" />
                 <input 
                   type="text" 
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                  placeholder="Enter your username"
+                  className="w-full pl-12 pr-4 pt-6 pb-2 bg-transparent outline-none text-[#1c1b1f] placeholder-transparent peer"
+                  placeholder="Username"
+                  id="username"
                 />
+                <label htmlFor="username" className="absolute left-12 top-2 text-xs text-[#49454f] font-medium transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-focus:top-2 peer-focus:text-xs peer-focus:text-[#6750a4]">Username</label>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-              <div className="relative">
-                <Lock className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <div className="relative bg-[#e7e0ec] rounded-t-xl border-b-2 border-[#49454f] focus-within:border-[#6750a4] transition-colors">
+                <Lock className="w-5 h-5 text-[#49454f] absolute left-4 top-1/2 -translate-y-1/2" />
                 <input 
                   type="password" 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                  placeholder="Enter your password"
+                  className="w-full pl-12 pr-4 pt-6 pb-2 bg-transparent outline-none text-[#1c1b1f] placeholder-transparent peer"
+                  placeholder="Password"
+                  id="password"
                 />
+                <label htmlFor="password" className="absolute left-12 top-2 text-xs text-[#49454f] font-medium transition-all peer-placeholder-shown:top-4 peer-placeholder-shown:text-base peer-focus:top-2 peer-focus:text-xs peer-focus:text-[#6750a4]">Password</label>
               </div>
             </div>
 
             <button 
               type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-lg transition-colors mt-2"
+              className="w-full bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium py-3.5 rounded-full transition-colors mt-6"
             >
               {authMode === 'login' ? 'Log In' : 'Sign Up'}
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-slate-500">
+          <div className="mt-6 text-center text-sm text-[#49454f]">
             {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
             <button 
               onClick={() => {
                 setAuthMode(authMode === 'login' ? 'register' : 'login');
                 setAuthError('');
               }}
-              className="text-indigo-600 font-semibold hover:underline"
+              className="text-[#6750a4] font-medium hover:underline"
             >
               {authMode === 'login' ? 'Sign up' : 'Log in'}
             </button>
@@ -363,37 +478,38 @@ export default function App() {
 
   // --- Main App Screen ---
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
+    <div className="min-h-screen bg-[#fdfcff] font-sans text-[#1c1b1f] pb-20">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Target className="w-6 h-6 text-indigo-600 shrink-0" />
-            <h1 className="text-lg sm:text-xl font-bold text-slate-900 truncate">JEE Smart Planner</h1>
+      <header className="bg-[#fdfcff] sticky top-0 z-10 pt-2 pb-2">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between bg-[#ece6f0] rounded-full mx-2 sm:mx-4 lg:mx-auto">
+          <div className="flex items-center gap-3 pl-2">
+            <div className="w-10 h-10 bg-[#d0bcff] rounded-full flex items-center justify-center">
+              <Target className="w-6 h-6 text-[#381e72] shrink-0" />
+            </div>
+            <h1 className="text-lg font-medium text-[#1c1b1f] truncate">JEE Smart Planner</h1>
           </div>
-          <div className="flex gap-2 sm:gap-4 text-sm font-medium items-center">
+          <div className="flex gap-2 sm:gap-3 text-sm font-medium items-center pr-2">
             {streak.count > 0 && (
-              <div className="hidden md:flex items-center gap-1.5 text-orange-600 bg-orange-50 px-3 py-1.5 rounded-full">
+              <div className="hidden md:flex items-center gap-1.5 text-[#8c1d18] bg-[#f9dedc] px-4 py-2 rounded-full">
                 <Flame className="w-4 h-4" />
                 <span>{streak.count} Day Streak</span>
               </div>
             )}
-            <div className="hidden md:flex items-center gap-1.5 text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">
+            <div className="hidden md:flex items-center gap-1.5 text-[#001d35] bg-[#d3e3fd] px-4 py-2 rounded-full">
               <Clock className="w-4 h-4" />
-              <span>{daysToTarget} days to Target</span>
+              <span>{daysToTarget}d to Target</span>
             </div>
-            <div className="hidden md:flex items-center gap-1.5 text-red-600 bg-red-50 px-3 py-1.5 rounded-full">
+            <div className="hidden md:flex items-center gap-1.5 text-[#31111d] bg-[#ffd8e4] px-4 py-2 rounded-full">
               <Calendar className="w-4 h-4" />
-              <span>{daysToExam} days to Exam</span>
+              <span>{daysToExam}d to Exam</span>
             </div>
-            <div className="h-6 w-px bg-slate-200 mx-1 hidden md:block"></div>
-            <div className="flex items-center gap-2 text-slate-600 bg-slate-100 px-2 sm:px-3 py-1.5 rounded-full max-w-[120px] sm:max-w-none">
+            <div className="flex items-center gap-2 text-[#21005d] bg-[#eaddff] px-4 py-2 rounded-full max-w-[120px] sm:max-w-none">
               <User className="w-4 h-4 shrink-0" />
-              <span className="font-semibold truncate">{currentUser}</span>
+              <span className="font-medium truncate">{currentUser}</span>
             </div>
             <button 
               onClick={handleLogout}
-              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+              className="p-2 text-[#49454f] hover:text-[#ba1a1a] hover:bg-[#ffdad6] rounded-full transition-colors shrink-0"
               title="Log out"
             >
               <LogOut className="w-5 h-5" />
@@ -403,18 +519,18 @@ export default function App() {
       </header>
 
       {/* Mobile Stats Bar */}
-      <div className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex flex-wrap gap-2 justify-center text-xs font-medium">
+      <div className="md:hidden px-4 py-3 flex flex-wrap gap-2 justify-center text-xs font-medium">
         {streak.count > 0 && (
-          <div className="flex items-center gap-1.5 text-orange-600 bg-orange-50 px-3 py-1.5 rounded-full">
+          <div className="flex items-center gap-1.5 text-[#8c1d18] bg-[#f9dedc] px-4 py-2 rounded-full">
             <Flame className="w-3.5 h-3.5" />
             <span>{streak.count} Day Streak</span>
           </div>
         )}
-        <div className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">
+        <div className="flex items-center gap-1.5 text-[#001d35] bg-[#d3e3fd] px-4 py-2 rounded-full">
           <Clock className="w-3.5 h-3.5" />
           <span>{daysToTarget}d to Target</span>
         </div>
-        <div className="flex items-center gap-1.5 text-red-600 bg-red-50 px-3 py-1.5 rounded-full">
+        <div className="flex items-center gap-1.5 text-[#31111d] bg-[#ffd8e4] px-4 py-2 rounded-full">
           <Calendar className="w-3.5 h-3.5" />
           <span>{daysToExam}d to Exam</span>
         </div>
@@ -423,52 +539,60 @@ export default function App() {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         {/* Navigation Tabs */}
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-1 bg-slate-200/50 p-1 rounded-xl w-full sm:w-fit mb-8">
+        <div className="flex flex-row gap-2 overflow-x-auto pb-4 mb-4 hide-scrollbar w-full">
           <button
             onClick={() => setActiveTab('plan')}
-            className={`flex-1 px-6 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-              activeTab === 'plan' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
+              activeTab === 'plan' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
             }`}
           >
             Daily Plan & Progress
           </button>
           <button
             onClick={() => setActiveTab('syllabus')}
-            className={`flex-1 px-6 py-2.5 text-sm font-medium rounded-lg transition-colors ${
-              activeTab === 'syllabus' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
+              activeTab === 'syllabus' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
             }`}
           >
             Syllabus Tracker
+          </button>
+          <button
+            onClick={() => setActiveTab('tests')}
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
+              activeTab === 'tests' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
+            }`}
+          >
+            Mock Tests
           </button>
         </div>
 
         {activeTab === 'plan' && (
           <div className="space-y-8">
             {/* Top 20 Goal Tracker */}
-            <section className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
                 <div>
-                  <h2 className="text-lg font-bold flex items-center gap-2">
-                    <Award className="w-5 h-5 text-yellow-500 shrink-0" />
+                  <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f]">
+                    <Award className="w-6 h-6 text-[#6750a4] shrink-0" />
                     Target: Top 20 Chapters by May 3rd
                   </h2>
-                  <p className="text-slate-500 text-sm mt-1">
+                  <p className="text-[#49454f] text-sm mt-1">
                     Focusing on the highest weightage chapters first to maximize your score.
                   </p>
                 </div>
                 <div className="text-left sm:text-right w-full sm:w-auto flex justify-between sm:block items-end">
-                  <span className="text-3xl font-black text-indigo-600">{top20CompletedCount}</span>
-                  <span className="text-slate-500 font-medium"> / 20</span>
+                  <span className="text-4xl font-normal text-[#6750a4]">{top20CompletedCount}</span>
+                  <span className="text-[#49454f] font-medium"> / 20</span>
                 </div>
               </div>
               
-              <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden">
+              <div className="w-full bg-[#eaddff] rounded-full h-4 mb-2 overflow-hidden">
                 <div 
-                  className="bg-indigo-600 h-3 rounded-full transition-all duration-500 ease-out"
+                  className="bg-[#6750a4] h-4 rounded-full transition-all duration-500 ease-out"
                   style={{ width: `${(top20CompletedCount / 20) * 100}%` }}
                 ></div>
               </div>
-              <p className="text-xs text-slate-500 font-medium text-right">
+              <p className="text-xs text-[#49454f] font-medium text-right">
                 {20 - top20CompletedCount} chapters remaining • {daysToTarget} days left
               </p>
             </section>
@@ -476,11 +600,11 @@ export default function App() {
             {/* Today's Plan */}
             <section>
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
-                <h2 className="text-xl font-bold flex items-center gap-2">
-                  <BookOpen className="w-5 h-5 text-slate-700 shrink-0" />
+                <h2 className="text-xl font-medium flex items-center gap-2 text-[#1c1b1f]">
+                  <BookOpen className="w-6 h-6 text-[#6750a4] shrink-0" />
                   Today's Lessons
                 </h2>
-                <span className="text-sm font-medium text-slate-500 bg-slate-200/50 px-3 py-1.5 rounded-full w-full sm:w-auto text-center">
+                <span className="text-sm font-medium text-[#21005d] bg-[#eaddff] px-4 py-2 rounded-full w-full sm:w-auto text-center">
                   Goal: {todaysPlanChapters.length} Lessons (Load: {currentPlanLoad}/10)
                 </span>
               </div>
@@ -490,24 +614,24 @@ export default function App() {
                   const colors = getSubjectColor(chapter.subject);
                   
                   return (
-                    <div key={chapter.id} className={`rounded-2xl p-5 border ${colors} relative overflow-hidden flex flex-col ${chapter.completed ? 'opacity-60' : ''}`}>
-                      <div className="text-xs font-bold uppercase tracking-wider mb-3 opacity-80">
+                    <div key={chapter.id} className={`rounded-[24px] p-6 bg-[#ece6f0] relative overflow-hidden flex flex-col ${chapter.completed ? 'opacity-60' : ''}`}>
+                      <div className="text-xs font-medium uppercase tracking-wider mb-3 text-[#49454f]">
                         {chapter.subject}
                       </div>
                       
-                      <h3 className={`font-semibold text-lg mb-2 leading-tight ${chapter.completed ? 'line-through' : ''}`}>
+                      <h3 className={`font-medium text-lg mb-2 leading-tight text-[#1c1b1f] ${chapter.completed ? 'line-through' : ''}`}>
                         {chapter.name}
                       </h3>
                       
                       <div className="flex items-center gap-2 mb-6 flex-wrap">
-                        <span className="bg-white/60 px-2 py-1 rounded text-xs font-bold">
+                        <span className="bg-[#eaddff] text-[#21005d] px-3 py-1 rounded-full text-xs font-medium">
                           Weight: {chapter.weightage}/10
                         </span>
-                        <span className="bg-white/60 px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
-                          Diff: {chapter.difficulty}/5 <Star className="w-3 h-3 fill-orange-400 text-orange-400" />
+                        <span className="bg-[#eaddff] text-[#21005d] px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+                          Diff: {chapter.difficulty}/5 <Star className="w-3 h-3 fill-[#6750a4] text-[#6750a4]" />
                         </span>
                         {top20Chapters.find(c => c.id === chapter.id) && (
-                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                          <span className="bg-[#ffdad6] text-[#410002] px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
                             <Award className="w-3 h-3" /> Top 20
                           </span>
                         )}
@@ -515,20 +639,20 @@ export default function App() {
                       
                       <button 
                         onClick={() => toggleChapter(chapter.id)}
-                        className={`mt-auto w-full font-semibold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm ${
+                        className={`mt-auto w-full font-medium py-3 rounded-full transition-colors flex items-center justify-center gap-2 ${
                           chapter.completed 
-                            ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' 
-                            : 'bg-white/80 hover:bg-white text-slate-900'
+                            ? 'bg-[#d3e3fd] text-[#001d35] hover:bg-[#c2d7ff]' 
+                            : 'bg-[#6750a4] hover:bg-[#4f378b] text-white'
                         }`}
                       >
                         {chapter.completed ? (
                           <>
-                            <CheckCircle2 className="w-4 h-4" />
+                            <CheckCircle2 className="w-5 h-5" />
                             Completed
                           </>
                         ) : (
                           <>
-                            <Circle className="w-4 h-4 text-slate-400" />
+                            <Circle className="w-5 h-5 text-[#eaddff]" />
                             Mark Complete
                           </>
                         )}
@@ -545,41 +669,157 @@ export default function App() {
               </div>
             </section>
 
-            {/* Overall Progress */}
-            <section className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
-              <h2 className="text-lg font-bold flex items-center gap-2 mb-4">
-                <TrendingUp className="w-5 h-5 text-emerald-500" />
-                Overall Syllabus Progress
+            {/* Pomodoro Timer */}
+            <section className="bg-[#f3edf7] rounded-[28px] p-6 flex flex-col items-center justify-center">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 w-full text-[#1c1b1f]">
+                <Clock className="w-6 h-6 text-[#6750a4]" />
+                Study Timer
               </h2>
+              <div className="flex gap-2 mb-6 bg-[#eaddff] p-1 rounded-full">
+                <button 
+                  onClick={() => switchTimerMode('work')}
+                  className={`px-6 py-2 text-sm font-medium rounded-full transition-colors ${timerMode === 'work' ? 'bg-[#6750a4] text-white' : 'text-[#21005d]'}`}
+                >
+                  Focus (25m)
+                </button>
+                <button 
+                  onClick={() => switchTimerMode('break')}
+                  className={`px-6 py-2 text-sm font-medium rounded-full transition-colors ${timerMode === 'break' ? 'bg-[#6750a4] text-white' : 'text-[#21005d]'}`}
+                >
+                  Break (5m)
+                </button>
+              </div>
+              <div className="text-7xl font-normal text-[#1c1b1f] mb-6 font-mono tracking-tighter">
+                {formatTime(timerTime)}
+              </div>
               <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <div className="w-full bg-slate-100 rounded-full h-2.5 mb-1 overflow-hidden">
-                    <div 
-                      className="bg-emerald-500 h-2.5 rounded-full transition-all duration-500"
-                      style={{ width: `${overallProgress}%` }}
-                    ></div>
+                <button 
+                  onClick={toggleTimer}
+                  className={`flex items-center gap-2 px-8 py-4 rounded-full font-medium text-white transition-colors ${isTimerRunning ? 'bg-[#ba1a1a] hover:bg-[#93000a]' : 'bg-[#6750a4] hover:bg-[#4f378b]'}`}
+                >
+                  {isTimerRunning ? <><Pause className="w-6 h-6" /> Pause</> : <><Play className="w-6 h-6" /> Start</>}
+                </button>
+                <button 
+                  onClick={resetTimer}
+                  className="p-4 text-[#49454f] hover:bg-[#eaddff] rounded-full transition-colors"
+                  title="Reset Timer"
+                >
+                  <RotateCcw className="w-6 h-6" />
+                </button>
+              </div>
+            </section>
+
+            {/* Overall Progress */}
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f]">
+                <TrendingUp className="w-6 h-6 text-[#6750a4]" />
+                Syllabus Progress
+              </h2>
+              
+              <div className="space-y-6">
+                <div>
+                  <div className="flex justify-between text-sm mb-2 text-[#1c1b1f]">
+                    <span className="font-medium">Overall</span>
+                    <span className="font-medium">{overallProgress}%</span>
+                  </div>
+                  <div className="w-full bg-[#eaddff] rounded-full h-4 overflow-hidden">
+                    <div className="bg-[#6750a4] h-4 rounded-full transition-all duration-500" style={{ width: `${overallProgress}%` }}></div>
                   </div>
                 </div>
-                <span className="font-bold text-slate-700 w-12 text-right">{overallProgress}%</span>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-[#cac4d0]">
+                  {(['Physics', 'Chemistry', 'Mathematics'] as Subject[]).map(sub => {
+                    const prog = getSubjectProgress(sub);
+                    const colorClass = sub === 'Physics' ? 'bg-[#0061a4]' : sub === 'Chemistry' ? 'bg-[#006d3a]' : 'bg-[#6750a4]';
+                    return (
+                      <div key={sub}>
+                        <div className="flex justify-between text-xs mb-1.5">
+                          <span className="font-medium text-[#1c1b1f]">{sub}</span>
+                          <span className="text-[#49454f]">{prog.completed}/{prog.total}</span>
+                        </div>
+                        <div className="w-full bg-[#eaddff] rounded-full h-2 overflow-hidden">
+                          <div className={`${colorClass} h-2 rounded-full transition-all duration-500`} style={{ width: `${prog.percentage}%` }}></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+
+            {/* Activity Heatmap */}
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
+                <Flame className="w-6 h-6 text-[#ba1a1a]" />
+                30-Day Activity Heatmap
+              </h2>
+              <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                {last30Days.map(date => {
+                  const count = activityLog[date] || 0;
+                  let bg = 'bg-[#eaddff]';
+                  if (count === 1) bg = 'bg-[#d0bcff]';
+                  else if (count === 2) bg = 'bg-[#9a82db]';
+                  else if (count === 3) bg = 'bg-[#6750a4]';
+                  else if (count > 3) bg = 'bg-[#4f378b]';
+                  
+                  return (
+                    <div 
+                      key={date} 
+                      title={`${date}: ${count} lessons`}
+                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-[6px] ${bg} transition-colors hover:ring-2 ring-[#21005d] ring-offset-1`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2 mt-4 text-xs text-[#49454f] font-medium">
+                <span>Less</span>
+                <div className="w-3 h-3 rounded-[4px] bg-[#eaddff]"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#d0bcff]"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#9a82db]"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#6750a4]"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#4f378b]"></div>
+                <span>More</span>
               </div>
             </section>
           </div>
         )}
 
         {activeTab === 'syllabus' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-              <h2 className="text-lg font-bold">Full Syllabus Tracker</h2>
-              <p className="text-sm text-slate-500 mt-1">Update your progress and chapter difficulty here to adjust your daily plan automatically.</p>
-            </div>
+          <div className="space-y-6">
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
+                <Target className="w-6 h-6 text-[#6750a4]" />
+                Subject Mastery Radar
+              </h2>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+                    <PolarGrid stroke="#cac4d0" />
+                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#49454f', fontSize: 12, fontWeight: 500 }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#49454f', fontSize: 10 }} />
+                    <Radar name="Completion %" dataKey="completion" stroke="#6750a4" strokeWidth={2} fill="#6750a4" fillOpacity={0.5} />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#ece6f0' }}
+                      itemStyle={{ color: '#6750a4', fontWeight: '500' }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+
+            <div className="bg-[#fdfcff] rounded-[28px] shadow-sm border border-[#cac4d0] overflow-hidden">
+              <div className="p-6 border-b border-[#cac4d0] bg-[#ece6f0]">
+                <h2 className="text-lg font-medium text-[#1c1b1f]">Full Syllabus Tracker</h2>
+                <p className="text-sm text-[#49454f] mt-1">Update your progress and chapter difficulty here to adjust your daily plan automatically.</p>
+              </div>
             
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-[#cac4d0]">
               {(['Physics', 'Chemistry', 'Mathematics'] as Subject[]).map(subject => (
                 <div key={subject} className="p-6">
-                  <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                  <h3 className="font-medium text-lg mb-4 flex items-center gap-2 text-[#1c1b1f]">
                     <div className={`w-3 h-3 rounded-full ${
-                      subject === 'Physics' ? 'bg-blue-500' : 
-                      subject === 'Chemistry' ? 'bg-emerald-500' : 'bg-purple-500'
+                      subject === 'Physics' ? 'bg-[#0061a4]' : 
+                      subject === 'Chemistry' ? 'bg-[#006d3a]' : 'bg-[#6750a4]'
                     }`} />
                     {subject}
                   </h3>
@@ -594,28 +834,28 @@ export default function App() {
                           <div 
                             key={chapter.id}
                             onClick={() => toggleChapter(chapter.id)}
-                            className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
+                            className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-[16px] cursor-pointer transition-all ${
                               chapter.completed 
-                                ? 'bg-slate-50 border-slate-200 opacity-60' 
-                                : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm'
+                                ? 'bg-[#f3edf7] opacity-60' 
+                                : 'bg-[#fdfcff] border border-[#cac4d0] hover:bg-[#ece6f0]'
                             }`}
                           >
                             <div className="flex items-start sm:items-center gap-3 mb-3 sm:mb-0">
                               {chapter.completed ? (
-                                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5 sm:mt-0" />
+                                <CheckCircle2 className="w-6 h-6 text-[#6750a4] shrink-0 mt-0.5 sm:mt-0" />
                               ) : (
-                                <Circle className="w-5 h-5 text-slate-300 shrink-0 mt-0.5 sm:mt-0" />
+                                <Circle className="w-6 h-6 text-[#49454f] shrink-0 mt-0.5 sm:mt-0" />
                               )}
                               <div>
-                                <p className={`font-medium ${chapter.completed ? 'line-through text-slate-500' : 'text-slate-800'}`}>
+                                <p className={`font-medium ${chapter.completed ? 'line-through text-[#49454f]' : 'text-[#1c1b1f]'}`}>
                                   {chapter.name}
                                 </p>
                                 <div className="flex items-center gap-4 mt-1.5 flex-wrap">
-                                  <span className="text-xs font-medium text-slate-500">
+                                  <span className="text-xs font-medium text-[#49454f]">
                                     Weightage: {chapter.weightage}/10
                                   </span>
                                   {isTop20 && (
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-yellow-600 bg-yellow-100 px-1.5 py-0.5 rounded">
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-[#410002] bg-[#ffdad6] px-2 py-1 rounded-full">
                                       Top 20
                                     </span>
                                   )}
@@ -625,14 +865,14 @@ export default function App() {
                             
                             {/* Difficulty Selector */}
                             <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto mt-3 sm:mt-0 pl-8 sm:pl-0 gap-1" onClick={e => e.stopPropagation()}>
-                              <span className="text-xs font-medium text-slate-500 mr-1">Difficulty:</span>
+                              <span className="text-xs font-medium text-[#49454f] mr-1">Difficulty:</span>
                               <div className="flex">
                                 {[1, 2, 3, 4, 5].map(star => (
                                   <button
                                     key={star}
                                     onClick={() => setChapterDifficulty(chapter.id, star)}
-                                    className={`p-1 transition-colors rounded-full hover:bg-slate-100 ${
-                                      chapter.difficulty >= star ? 'text-orange-400' : 'text-slate-200 hover:text-orange-300'
+                                    className={`p-1 transition-colors rounded-full hover:bg-[#eaddff] ${
+                                      chapter.difficulty >= star ? 'text-[#6750a4]' : 'text-[#cac4d0] hover:text-[#6750a4]'
                                     }`}
                                   >
                                     <Star className={`w-4 h-4 sm:w-5 sm:h-5 ${chapter.difficulty >= star ? 'fill-current' : ''}`} />
@@ -647,6 +887,114 @@ export default function App() {
                 </div>
               ))}
             </div>
+          </div>
+          </div>
+        )}
+
+        {activeTab === 'tests' && (
+          <div className="space-y-6">
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
+                <TrendingUp className="w-6 h-6 text-[#6750a4]" />
+                Score Trend
+              </h2>
+              <div className="h-64 w-full">
+                {mockTests.length > 1 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={testChartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#cac4d0" vertical={false} />
+                      <XAxis dataKey="name" stroke="#49454f" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis domain={[0, 180]} stroke="#49454f" fontSize={12} tickLine={false} axisLine={false} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#ece6f0' }}
+                        labelStyle={{ fontWeight: '500', color: '#1c1b1f', marginBottom: '4px' }}
+                      />
+                      <Line type="monotone" dataKey="score" name="Score" stroke="#6750a4" strokeWidth={3} dot={{ r: 4, fill: '#6750a4', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-[#49454f] text-sm bg-[#ece6f0] rounded-[24px] border border-dashed border-[#cac4d0]">
+                    <BarChart className="w-8 h-8 mb-2 text-[#49454f]" />
+                    <p>Log at least 2 tests to see your trend.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
+                <Activity className="w-6 h-6 text-[#6750a4]" />
+                Log Mock Test Score
+              </h2>
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.target as HTMLFormElement;
+                  const scoreInput = form.elements.namedItem('score') as HTMLInputElement;
+                  const score = parseInt(scoreInput.value, 10);
+                  if (!isNaN(score) && score >= 0 && score <= 300) {
+                    setMockTests(prev => [{ id: Date.now().toString(), date: todayStr, score }, ...prev]);
+                    scoreInput.value = '';
+                  }
+                }}
+                className="flex gap-4 items-end"
+              >
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-[#49454f] mb-1">Score (out of 180)</label>
+                  <input 
+                    type="number" 
+                    name="score"
+                    min="0" 
+                    max="180" 
+                    required
+                    className="w-full px-4 py-3 bg-[#ece6f0] border-b-2 border-[#49454f] rounded-t-[4px] focus:border-[#6750a4] outline-none transition-all text-[#1c1b1f]"
+                    placeholder="e.g. 100"
+                  />
+                </div>
+                <button 
+                  type="submit"
+                  className="bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium px-6 py-3 rounded-full transition-colors h-[48px] flex items-center"
+                >
+                  Log Score
+                </button>
+              </form>
+            </section>
+
+            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f]">
+                <BarChart className="w-6 h-6 text-[#6750a4]" />
+                Past Scores
+              </h2>
+              {mockTests.length > 0 ? (
+                <div className="space-y-3">
+                  {mockTests.map(test => (
+                    <div key={test.id} className="flex items-center justify-between p-4 rounded-[24px] bg-[#ece6f0]">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-full bg-[#eaddff] flex items-center justify-center font-medium text-[#21005d]">
+                          {Math.round((test.score / 180) * 100)}%
+                        </div>
+                        <div>
+                          <p className="font-medium text-[#1c1b1f]">{test.score} / 180</p>
+                          <p className="text-xs text-[#49454f]">{new Date(test.date).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setMockTests(prev => prev.filter(t => t.id !== test.id))}
+                        className="text-sm text-[#ba1a1a] hover:text-[#93000a] font-medium px-4 py-2 rounded-full hover:bg-[#ffdad6] transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-[#49454f]">
+                  <Activity className="w-12 h-12 mx-auto mb-3 text-[#cac4d0]" />
+                  <p>No mock tests logged yet.</p>
+                  <p className="text-sm">Log your first score above to start tracking your performance!</p>
+                </div>
+              )}
+            </section>
           </div>
         )}
 
