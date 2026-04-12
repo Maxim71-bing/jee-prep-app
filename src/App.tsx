@@ -311,6 +311,23 @@ export default function App() {
       interval = setInterval(() => setTimerTime(prev => prev - 1), 1000);
     } else if (timerTime === 0 && isTimerRunning) {
       setIsTimerRunning(false);
+      
+      // Play alarm sound
+      try {
+        // Using a direct audio file URL for forest birds (Pixabay link is a webpage, not a direct audio file)
+        const audio = new Audio('https://actions.google.com/sounds/v1/animals/birds_in_forest.ogg');
+        audio.loop = true;
+        audio.play().catch(e => console.log('Audio playback failed:', e));
+        
+        // Stop after 10 seconds
+        setTimeout(() => {
+          audio.pause();
+          audio.currentTime = 0;
+        }, 10000);
+      } catch (e) {
+        console.log('Audio not supported');
+      }
+
       // Auto-switch mode
       if (timerMode === 'work') {
         setTimerMode('break');
