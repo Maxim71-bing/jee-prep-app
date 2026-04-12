@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
@@ -94,6 +94,15 @@ export default function App() {
   const [timerTime, setTimerTime] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timerMode, setTimerMode] = useState<'work' | 'break'>('work');
+  const [targetEndTime, setTargetEndTime] = useState<number | null>(null);
+  
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+
+  useEffect(() => {
+    audioRef.current = new Audio('https://actions.google.com/sounds/v1/animals/birds_in_forest.ogg');
+    audioRef.current.loop = true;
+  }, []);
 
   // --- Persistence Effects ---
   
@@ -307,46 +316,112 @@ export default function App() {
   // Timer Logic
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isTimerRunning && timerTime > 0) {
-      interval = setInterval(() => setTimerTime(prev => prev - 1), 1000);
-    } else if (timerTime === 0 && isTimerRunning) {
-      setIsTimerRunning(false);
-      
-      // Play alarm sound
-      try {
-        // Using a direct audio file URL for forest birds (Pixabay link is a webpage, not a direct audio file)
-        const audio = new Audio('https://actions.google.com/sounds/v1/animals/birds_in_forest.ogg');
-        audio.loop = true;
-        audio.play().catch(e => console.log('Audio playback failed:', e));
-        
-        // Stop after 10 seconds
-        setTimeout(() => {
-          audio.pause();
-          audio.currentTime = 0;
-        }, 10000);
-      } catch (e) {
-        console.log('Audio not supported');
-      }
+    
+    if (isTimerRunning && targetEndTime) {
+      interval = setInterval(() => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.round((targetEndTime - now) / 1000));
+        setTimerTime(remaining);
 
-      // Auto-switch mode
-      if (timerMode === 'work') {
-        setTimerMode('break');
-        setTimerTime(5 * 60);
-      } else {
-        setTimerMode('work');
-        setTimerTime(25 * 60);
-      }
+        if (remaining === 0) {
+          setIsTimerRunning(false);
+          setTargetEndTime(null);
+          
+          // Play alarm sound
+          if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play().catch(e => console.log('Audio playback failed:', e));
+            
+            // Stop after 10 seconds
+            setTimeout(() => {
+              if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current.currentTime = 0;
+              }
+            }, 10000);
+          }
+
+          // Show Push Notification
+          if ('Notification' in window && Notification.permission === 'granted') {
+            const title = timerMode === 'work' ? 'Focus Session Complete!' : 'Break Time Over!';
+            const body = timerMode === 'work' ? 'Time to take a 5-minute break.' : 'Time to get back to focus!';
+            
+            navigator.serviceWorker.ready.then(registration => {
+              registration.showNotification(title, {
+                body,
+                icon: '/pwa-192x192.png',
+                vibrate: [200, 100, 200, 100, 200, 100, 200],
+                requireInteraction: true
+              } as any);
+            }).catch(() => {
+              new Notification(title, { body, icon: '/pwa-192x192.png' });
+            });
+          }
+
+          // Auto-switch mode
+          if (timerMode === 'work') {
+            setTimerMode('break');
+            setTimerTime(5 * 60);
+          } else {
+            setTimerMode('work');
+            setTimerTime(25 * 60);
+          }
+        }
+      }, 1000);
     }
+    
     return () => clearInterval(interval);
-  }, [isTimerRunning, timerTime, timerMode]);
+  }, [isTimerRunning, targetEndTime, timerMode]);
 
-  const toggleTimer = () => setIsTimerRunning(!isTimerRunning);
+  // Handle visibility change to sync timer immediately when phone wakes up
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isTimerRunning && targetEndTime) {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.round((targetEndTime - now) / 1000));
+        setTimerTime(remaining);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isTimerRunning, targetEndTime]);
+
+  const toggleTimer = () => {
+    if (!isTimerRunning) {
+      // Request Notification Permission
+      if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+        Notification.requestPermission();
+      }
+
+      // Unlock Audio
+      if (audioRef.current && !audioUnlocked) {
+        audioRef.current.volume = 0;
+        audioRef.current.play().then(() => {
+          audioRef.current?.pause();
+          if (audioRef.current) {
+            audioRef.current.volume = 1;
+            audioRef.current.currentTime = 0;
+          }
+          setAudioUnlocked(true);
+        }).catch(e => console.log('Audio unlock failed:', e));
+      }
+      
+      // Start Timer
+      setTargetEndTime(Date.now() + timerTime * 1000);
+    } else {
+      // Pause Timer
+      setTargetEndTime(null);
+    }
+    setIsTimerRunning(!isTimerRunning);
+  };
   const resetTimer = () => {
     setIsTimerRunning(false);
+    setTargetEndTime(null);
     setTimerTime(timerMode === 'work' ? 25 * 60 : 5 * 60);
   };
   const switchTimerMode = (mode: 'work' | 'break') => {
     setIsTimerRunning(false);
+    setTargetEndTime(null);
     setTimerMode(mode);
     setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
   };

@@ -12,6 +12,7 @@ export default defineConfig(({mode}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        injectRegister: 'auto',
         includeAssets: ['icon.svg'],
         manifest: {
           name: 'JEE Prep App Builder',
@@ -20,6 +21,8 @@ export default defineConfig(({mode}) => {
           theme_color: '#ffffff',
           background_color: '#ffffff',
           display: 'standalone',
+          orientation: 'portrait',
+          id: '/?source=pwa',
           start_url: '/',
           icons: [
             {
@@ -27,6 +30,30 @@ export default defineConfig(({mode}) => {
               sizes: '192x192 512x512',
               type: 'image/svg+xml',
               purpose: 'any maskable'
+            },
+            {
+              src: 'https://placehold.co/192x192.png',
+              sizes: '192x192',
+              type: 'image/png'
+            },
+            {
+              src: 'https://placehold.co/512x512.png',
+              sizes: '512x512',
+              type: 'image/png'
+            }
+          ],
+          screenshots: [
+            {
+              src: 'https://placehold.co/1280x720.png',
+              sizes: '1280x720',
+              type: 'image/png',
+              form_factor: 'wide'
+            },
+            {
+              src: 'https://placehold.co/750x1334.png',
+              sizes: '750x1334',
+              type: 'image/png',
+              form_factor: 'narrow'
             }
           ]
         }
