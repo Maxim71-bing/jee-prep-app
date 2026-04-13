@@ -14,6 +14,9 @@ export default defineConfig(({mode}) => {
         registerType: 'autoUpdate',
         injectRegister: 'auto',
         includeAssets: ['icon.svg'],
+        devOptions: {
+          enabled: true
+        },
         manifest: {
           name: 'JEE Prep App Builder',
           short_name: 'JEEPrep',

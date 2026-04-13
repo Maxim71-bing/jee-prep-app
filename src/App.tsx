@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { silentAudio } from './silentAudio';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
@@ -97,11 +98,22 @@ export default function App() {
   const [targetEndTime, setTargetEndTime] = useState<number | null>(null);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const silentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const workerRef = useRef<Worker | null>(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
 
   useEffect(() => {
     audioRef.current = new Audio('https://actions.google.com/sounds/v1/animals/birds_in_forest.ogg');
     audioRef.current.loop = true;
+    
+    silentAudioRef.current = new Audio(silentAudio);
+    silentAudioRef.current.loop = true;
+
+    workerRef.current = new Worker(new URL('./timerWorker.ts', import.meta.url), { type: 'module' });
+
+    return () => {
+      workerRef.current?.terminate();
+    };
   }, []);
 
   // --- Persistence Effects ---
@@ -315,10 +327,10 @@ export default function App() {
 
   // Timer Logic
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (isTimerRunning && targetEndTime) {
-      interval = setInterval(() => {
+    if (!workerRef.current) return;
+
+    const handleWorkerMessage = (e: MessageEvent) => {
+      if (e.data.type === 'tick' && isTimerRunning && targetEndTime) {
         const now = Date.now();
         const remaining = Math.max(0, Math.round((targetEndTime - now) / 1000));
         setTimerTime(remaining);
@@ -326,6 +338,8 @@ export default function App() {
         if (remaining === 0) {
           setIsTimerRunning(false);
           setTargetEndTime(null);
+          workerRef.current?.postMessage({ command: 'stop' });
+          silentAudioRef.current?.pause();
           
           // Play alarm sound
           if (audioRef.current) {
@@ -367,10 +381,20 @@ export default function App() {
             setTimerTime(25 * 60);
           }
         }
-      }, 1000);
-    }
+      }
+    };
+
+    workerRef.current.addEventListener('message', handleWorkerMessage);
     
-    return () => clearInterval(interval);
+    if (isTimerRunning && targetEndTime) {
+      workerRef.current.postMessage({ command: 'start' });
+    } else {
+      workerRef.current.postMessage({ command: 'stop' });
+    }
+
+    return () => {
+      workerRef.current?.removeEventListener('message', handleWorkerMessage);
+    };
   }, [isTimerRunning, targetEndTime, timerMode]);
 
   // Handle visibility change to sync timer immediately when phone wakes up
@@ -393,17 +417,23 @@ export default function App() {
         Notification.requestPermission();
       }
 
-      // Unlock Audio
-      if (audioRef.current && !audioUnlocked) {
-        audioRef.current.volume = 0;
-        audioRef.current.play().then(() => {
-          audioRef.current?.pause();
-          if (audioRef.current) {
-            audioRef.current.volume = 1;
-            audioRef.current.currentTime = 0;
-          }
-          setAudioUnlocked(true);
-        }).catch(e => console.log('Audio unlock failed:', e));
+      // Unlock Audio and start silent audio
+      if (audioRef.current && silentAudioRef.current) {
+        if (!audioUnlocked) {
+          audioRef.current.volume = 0;
+          audioRef.current.play().then(() => {
+            audioRef.current?.pause();
+            if (audioRef.current) {
+              audioRef.current.volume = 1;
+              audioRef.current.currentTime = 0;
+            }
+            setAudioUnlocked(true);
+          }).catch(e => console.log('Audio unlock failed:', e));
+        }
+        
+        // Always play silent audio when timer starts
+        silentAudioRef.current.volume = 1;
+        silentAudioRef.current.play().catch(e => console.log('Silent audio play failed:', e));
       }
       
       // Start Timer
@@ -411,17 +441,20 @@ export default function App() {
     } else {
       // Pause Timer
       setTargetEndTime(null);
+      silentAudioRef.current?.pause();
     }
     setIsTimerRunning(!isTimerRunning);
   };
   const resetTimer = () => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
+    silentAudioRef.current?.pause();
     setTimerTime(timerMode === 'work' ? 25 * 60 : 5 * 60);
   };
   const switchTimerMode = (mode: 'work' | 'break') => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
+    silentAudioRef.current?.pause();
     setTimerMode(mode);
     setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
   };
