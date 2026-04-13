@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { silentAudio } from './silentAudio';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
@@ -22,7 +21,9 @@ import {
   Pause,
   RotateCcw,
   BarChart,
-  Activity
+  Activity,
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 
 // --- Types ---
@@ -30,8 +31,16 @@ interface MockTest {
   id: string;
   date: string;
   score: number;
+  physicsScore?: number;
+  chemistryScore?: number;
+  mathScore?: number;
+  conceptualErrors?: number;
+  calculationErrors?: number;
+  timeErrors?: number;
+  notes?: string;
 }
 type Subject = 'Physics' | 'Chemistry' | 'Mathematics';
+type Confidence = 'Low' | 'Medium' | 'High';
 
 interface Chapter {
   id: string;
@@ -40,6 +49,9 @@ interface Chapter {
   weightage: number; // 1 to 10 scale based on historical JEE importance
   difficulty: number; // 1 to 5 scale
   completed: boolean;
+  confidence?: Confidence;
+  revisionCount?: number;
+  lastRevised?: string;
 }
 
 // --- Initial Data (Based on JEE Syllabus PDF) ---
@@ -90,24 +102,42 @@ export default function App() {
   const [streak, setStreak] = useState<{count: number, lastActivityDate: string}>({ count: 0, lastActivityDate: '' });
   const [mockTests, setMockTests] = useState<MockTest[]>([]);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
+  const [dailyBig3, setDailyBig3] = useState<{date: string, tasks: {id: string, text: string, completed: boolean}[]}>({ date: '', tasks: [] });
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [goalScore, setGoalScore] = useState<number>(200);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Pomodoro State
   const [timerTime, setTimerTime] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timerMode, setTimerMode] = useState<'work' | 'break'>('work');
   const [targetEndTime, setTargetEndTime] = useState<number | null>(null);
+  const [sessionNotes, setSessionNotes] = useState('');
   
+  // Mock Test Form State
+  const [mtPhysics, setMtPhysics] = useState('');
+  const [mtChemistry, setMtChemistry] = useState('');
+  const [mtMath, setMtMath] = useState('');
+  const [mtConceptual, setMtConceptual] = useState('');
+  const [mtCalculation, setMtCalculation] = useState('');
+  const [mtTime, setMtTime] = useState('');
+  const [mtNotes, setMtNotes] = useState('');
+  
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const silentAudioRef = useRef<HTMLAudioElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
 
   useEffect(() => {
     audioRef.current = new Audio('https://actions.google.com/sounds/v1/animals/birds_in_forest.ogg');
     audioRef.current.loop = true;
-    
-    silentAudioRef.current = new Audio(silentAudio);
-    silentAudioRef.current.loop = true;
 
     workerRef.current = new Worker(new URL('./timerWorker.ts', import.meta.url), { type: 'module' });
 
@@ -130,11 +160,12 @@ export default function App() {
   // 2. Save user data whenever chapters change
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog }));
+      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore }));
     }
-  }, [chapters, dailyPlan, streak, mockTests, activityLog, currentUser]);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, currentUser]);
 
   const loadUserData = (user: string) => {
+    setIsLoading(true);
     const data = localStorage.getItem(`jee_data_${user}`);
     if (data) {
       try {
@@ -145,12 +176,16 @@ export default function App() {
           setStreak({ count: 0, lastActivityDate: '' });
           setMockTests([]);
           setActivityLog({});
+          setDailyBig3({ date: '', tasks: [] });
+          setGoalScore(200);
         } else {
           setChapters(parsed.chapters || INITIAL_CHAPTERS);
           setDailyPlan(parsed.dailyPlan || { date: '', chapterIds: [] });
           setStreak(parsed.streak || { count: 0, lastActivityDate: '' });
           setMockTests(parsed.mockTests || []);
           setActivityLog(parsed.activityLog || {});
+          setDailyBig3(parsed.dailyBig3 || { date: '', tasks: [] });
+          setGoalScore(parsed.goalScore || 200);
         }
       } catch (e) {
         setChapters(INITIAL_CHAPTERS);
@@ -161,7 +196,14 @@ export default function App() {
       setStreak({ count: 0, lastActivityDate: '' });
       setMockTests([]);
       setActivityLog({});
+      setDailyBig3({ date: '', tasks: [] });
+      setGoalScore(200);
     }
+    
+    // Simulate brief loading for skeleton screens
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 600);
   };
 
   // --- Auth Handlers ---
@@ -224,6 +266,40 @@ export default function App() {
   const daysToExam = Math.ceil((examDate.getTime() - todayDateObj.getTime()) / (1000 * 3600 * 24));
 
   // --- Derived State & Logic ---
+  const quotes = [
+    "Success is the sum of small efforts, repeated day in and day out.",
+    "The only way to do great work is to love what you do.",
+    "Don't watch the clock; do what it does. Keep going.",
+    "The future depends on what you do today.",
+    "Believe you can and you're halfway there."
+  ];
+  const dailyQuote = useMemo(() => quotes[Math.floor(Math.random() * quotes.length)], []);
+
+  const predictedPercentile = useMemo(() => {
+    if (mockTests.length === 0) return null;
+    const latestScore = mockTests[0].score;
+    // Dummy formula for percentile estimation based on score out of 300
+    let percentile = (latestScore / 300) * 100;
+    if (latestScore > 150) percentile += (latestScore - 150) * 0.15;
+    if (latestScore > 200) percentile += (latestScore - 200) * 0.1;
+    return Math.min(99.99, Math.max(0, percentile)).toFixed(2);
+  }, [mockTests]);
+
+  const testInsights = useMemo(() => {
+    if (mockTests.length === 0) return null;
+    const recentTests = mockTests.slice(0, 3);
+    const totalConceptual = recentTests.reduce((sum, t) => sum + (t.conceptualErrors || 0), 0);
+    const totalCalc = recentTests.reduce((sum, t) => sum + (t.calculationErrors || 0), 0);
+    const totalTime = recentTests.reduce((sum, t) => sum + (t.timeErrors || 0), 0);
+    
+    let primaryIssue = 'None';
+    let maxErrors = 0;
+    if (totalConceptual > maxErrors) { primaryIssue = 'Conceptual'; maxErrors = totalConceptual; }
+    if (totalCalc > maxErrors) { primaryIssue = 'Calculation'; maxErrors = totalCalc; }
+    if (totalTime > maxErrors) { primaryIssue = 'Time Management'; maxErrors = totalTime; }
+    
+    return { primaryIssue, maxErrors, totalConceptual, totalCalc, totalTime };
+  }, [mockTests]);
 
   // 1. Identify the Top 20 Most Important Chapters overall
   const top20Chapters = useMemo(() => {
@@ -321,6 +397,12 @@ export default function App() {
     return [...mockTests].reverse().map((t, index) => ({
       name: `Test ${index + 1}`,
       score: t.score,
+      physics: t.physicsScore || 0,
+      chemistry: t.chemistryScore || 0,
+      math: t.mathScore || 0,
+      conceptual: t.conceptualErrors || 0,
+      calculation: t.calculationErrors || 0,
+      time: t.timeErrors || 0,
       date: new Date(t.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
     }));
   }, [mockTests]);
@@ -339,12 +421,11 @@ export default function App() {
           setIsTimerRunning(false);
           setTargetEndTime(null);
           workerRef.current?.postMessage({ command: 'stop' });
-          silentAudioRef.current?.pause();
           
-          // Play alarm sound
+          // Play alarm sound by unmuting the already-playing background track
           if (audioRef.current) {
+            audioRef.current.volume = 1;
             audioRef.current.currentTime = 0;
-            audioRef.current.play().catch(e => console.log('Audio playback failed:', e));
             
             // Stop after 10 seconds
             setTimeout(() => {
@@ -418,7 +499,7 @@ export default function App() {
       }
 
       // Unlock Audio and start silent audio
-      if (audioRef.current && silentAudioRef.current) {
+      if (audioRef.current) {
         if (!audioUnlocked) {
           audioRef.current.volume = 0;
           audioRef.current.play().then(() => {
@@ -431,9 +512,9 @@ export default function App() {
           }).catch(e => console.log('Audio unlock failed:', e));
         }
         
-        // Always play silent audio when timer starts
-        silentAudioRef.current.volume = 1;
-        silentAudioRef.current.play().catch(e => console.log('Silent audio play failed:', e));
+        // Always play audio at volume 0 when timer starts to keep background alive
+        audioRef.current.volume = 0;
+        audioRef.current.play().catch(e => console.log('Audio play failed:', e));
       }
       
       // Start Timer
@@ -441,20 +522,20 @@ export default function App() {
     } else {
       // Pause Timer
       setTargetEndTime(null);
-      silentAudioRef.current?.pause();
+      audioRef.current?.pause();
     }
     setIsTimerRunning(!isTimerRunning);
   };
   const resetTimer = () => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
-    silentAudioRef.current?.pause();
+    audioRef.current?.pause();
     setTimerTime(timerMode === 'work' ? 25 * 60 : 5 * 60);
   };
   const switchTimerMode = (mode: 'work' | 'break') => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
-    silentAudioRef.current?.pause();
+    audioRef.current?.pause();
     setTimerMode(mode);
     setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
   };
@@ -464,6 +545,24 @@ export default function App() {
     const s = seconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  // 5. Backlog Manager
+  const backlogChapters = useMemo(() => {
+    return chapters
+      .filter(c => !c.completed && c.weightage >= 7)
+      .sort((a, b) => b.weightage - a.weightage)
+      .slice(0, 5);
+  }, [chapters]);
+
+  // 6. Needs Revision
+  const needsRevisionChapters = useMemo(() => {
+    const fifteenDaysAgo = new Date(todayDateObj);
+    fifteenDaysAgo.setDate(fifteenDaysAgo.getDate() - 15);
+    return chapters
+      .filter(c => c.completed && (!c.lastRevised || new Date(c.lastRevised) < fifteenDaysAgo))
+      .sort((a, b) => b.weightage - a.weightage)
+      .slice(0, 5);
+  }, [chapters, todayDateObj]);
 
   // --- Handlers ---
   const toggleChapter = useCallback((id: string) => {
@@ -514,6 +613,18 @@ export default function App() {
       c.id === id ? { ...c, difficulty } : c
     ));
   }, []);
+
+  const setChapterConfidence = useCallback((id: string, confidence: Confidence) => {
+    setChapters(prev => prev.map(c => 
+      c.id === id ? { ...c, confidence } : c
+    ));
+  }, []);
+
+  const markChapterRevised = useCallback((id: string) => {
+    setChapters(prev => prev.map(c => 
+      c.id === id ? { ...c, revisionCount: (c.revisionCount || 0) + 1, lastRevised: todayStr } : c
+    ));
+  }, [todayStr]);
 
   // --- Render Helpers ---
   const getSubjectColor = (subject: Subject) => {
@@ -602,39 +713,63 @@ export default function App() {
   }
 
   // --- Main App Screen ---
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#fdfcff] dark:bg-gray-900 transition-colors duration-300 p-4 pb-20">
+        <div className="max-w-5xl mx-auto space-y-6 animate-pulse">
+          <div className="h-16 bg-[#ece6f0] dark:bg-gray-800 rounded-full w-full"></div>
+          <div className="flex gap-4">
+            <div className="h-10 bg-[#ece6f0] dark:bg-gray-800 rounded-full w-32"></div>
+            <div className="h-10 bg-[#ece6f0] dark:bg-gray-800 rounded-full w-32"></div>
+            <div className="h-10 bg-[#ece6f0] dark:bg-gray-800 rounded-full w-32"></div>
+          </div>
+          <div className="h-32 bg-[#ece6f0] dark:bg-gray-800 rounded-[28px] w-full"></div>
+          <div className="h-64 bg-[#ece6f0] dark:bg-gray-800 rounded-[28px] w-full"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#fdfcff] font-sans text-[#1c1b1f] pb-20">
+    <div className="min-h-screen bg-[#fdfcff] dark:bg-gray-900 transition-colors duration-300 font-sans text-[#1c1b1f] dark:text-gray-100 pb-20">
       {/* Header */}
-      <header className="bg-[#fdfcff] sticky top-0 z-10 pt-2 pb-2">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between bg-[#ece6f0] rounded-full mx-2 sm:mx-4 lg:mx-auto">
+      <header className="bg-[#fdfcff] dark:bg-gray-900 sticky top-0 z-10 pt-2 pb-2 transition-colors duration-300">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between bg-[#ece6f0] dark:bg-gray-800 rounded-full mx-2 sm:mx-4 lg:mx-auto transition-colors duration-300">
           <div className="flex items-center gap-3 pl-2">
-            <div className="w-10 h-10 bg-[#d0bcff] rounded-full flex items-center justify-center">
-              <Target className="w-6 h-6 text-[#381e72] shrink-0" />
+            <div className="w-10 h-10 bg-[#d0bcff] dark:bg-purple-600 rounded-full flex items-center justify-center">
+              <Target className="w-6 h-6 text-[#381e72] dark:text-white shrink-0" />
             </div>
-            <h1 className="text-lg font-medium text-[#1c1b1f] truncate">JEE Smart Planner</h1>
+            <h1 className="text-lg font-medium text-[#1c1b1f] dark:text-gray-100 truncate">JEE Smart Planner</h1>
           </div>
           <div className="flex gap-2 sm:gap-3 text-sm font-medium items-center pr-2">
             {streak.count > 0 && (
-              <div className="hidden md:flex items-center gap-1.5 text-[#8c1d18] bg-[#f9dedc] px-4 py-2 rounded-full">
+              <div className="hidden md:flex items-center gap-1.5 text-[#8c1d18] dark:text-red-300 bg-[#f9dedc] dark:bg-red-900/50 px-4 py-2 rounded-full">
                 <Flame className="w-4 h-4" />
                 <span>{streak.count} Day Streak</span>
               </div>
             )}
-            <div className="hidden md:flex items-center gap-1.5 text-[#001d35] bg-[#d3e3fd] px-4 py-2 rounded-full">
+            <div className="hidden md:flex items-center gap-1.5 text-[#001d35] dark:text-blue-300 bg-[#d3e3fd] dark:bg-blue-900/50 px-4 py-2 rounded-full">
               <Clock className="w-4 h-4" />
               <span>{daysToTarget}d to Target</span>
             </div>
-            <div className="hidden md:flex items-center gap-1.5 text-[#31111d] bg-[#ffd8e4] px-4 py-2 rounded-full">
+            <div className="hidden md:flex items-center gap-1.5 text-[#31111d] dark:text-pink-300 bg-[#ffd8e4] dark:bg-pink-900/50 px-4 py-2 rounded-full">
               <Calendar className="w-4 h-4" />
               <span>{daysToExam}d to Exam</span>
             </div>
-            <div className="flex items-center gap-2 text-[#21005d] bg-[#eaddff] px-4 py-2 rounded-full max-w-[120px] sm:max-w-none">
+            <button 
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2 text-[#49454f] dark:text-gray-300 hover:bg-[#e8def8] dark:hover:bg-gray-700 rounded-full transition-colors shrink-0"
+              title="Toggle Dark Mode"
+            >
+              {isDarkMode ? <Circle className="w-5 h-5 fill-current" /> : <Circle className="w-5 h-5" />}
+            </button>
+            <div className="flex items-center gap-2 text-[#21005d] dark:text-purple-200 bg-[#eaddff] dark:bg-purple-900/50 px-4 py-2 rounded-full max-w-[120px] sm:max-w-none">
               <User className="w-4 h-4 shrink-0" />
               <span className="font-medium truncate">{currentUser}</span>
             </div>
             <button 
               onClick={handleLogout}
-              className="p-2 text-[#49454f] hover:text-[#ba1a1a] hover:bg-[#ffdad6] rounded-full transition-colors shrink-0"
+              className="p-2 text-[#49454f] dark:text-gray-300 hover:text-[#ba1a1a] dark:hover:text-red-400 hover:bg-[#ffdad6] dark:hover:bg-red-900/50 rounded-full transition-colors shrink-0"
               title="Log out"
             >
               <LogOut className="w-5 h-5" />
@@ -693,8 +828,112 @@ export default function App() {
 
         {activeTab === 'plan' && (
           <div className="space-y-8">
+            {/* Motivational Quote */}
+            <div className="bg-[#eaddff] dark:bg-purple-900/30 rounded-[28px] p-6 text-center italic text-[#21005d] dark:text-purple-200 font-medium">
+              "{dailyQuote}"
+            </div>
+
+            {/* Daily Big 3 */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f] dark:text-gray-100 mb-4">
+                <Target className="w-6 h-6 text-[#6750a4] dark:text-purple-400 shrink-0" />
+                Daily Big 3
+              </h2>
+              <p className="text-[#49454f] dark:text-gray-400 text-sm mb-4">What are the 3 most important tasks for today?</p>
+              <div className="space-y-3">
+                {[0, 1, 2].map(index => {
+                  const task = dailyBig3.tasks[index] || { id: `task-${index}`, text: '', completed: false };
+                  return (
+                    <div key={index} className="flex items-center gap-3">
+                      <button 
+                        onClick={() => {
+                          const newTasks = [...dailyBig3.tasks];
+                          if (!newTasks[index]) newTasks[index] = { id: `task-${index}`, text: '', completed: false };
+                          newTasks[index].completed = !newTasks[index].completed;
+                          setDailyBig3({ date: todayStr, tasks: newTasks });
+                        }}
+                        className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-colors ${
+                          task.completed 
+                            ? 'bg-[#6750a4] border-[#6750a4] dark:bg-purple-500 dark:border-purple-500' 
+                            : 'border-[#79747e] dark:border-gray-500'
+                        }`}
+                      >
+                        {task.completed && <CheckCircle2 className="w-4 h-4 text-white" />}
+                      </button>
+                      <input 
+                        type="text"
+                        value={task.text}
+                        onChange={(e) => {
+                          const newTasks = [...dailyBig3.tasks];
+                          if (!newTasks[index]) newTasks[index] = { id: `task-${index}`, text: '', completed: false };
+                          newTasks[index].text = e.target.value;
+                          setDailyBig3({ date: todayStr, tasks: newTasks });
+                        }}
+                        placeholder={`Task ${index + 1}`}
+                        className={`flex-1 bg-transparent border-b border-[#79747e] dark:border-gray-600 focus:border-[#6750a4] dark:focus:border-purple-400 outline-none py-1 text-[#1c1b1f] dark:text-gray-100 transition-colors ${task.completed ? 'line-through text-[#49454f] dark:text-gray-500' : ''}`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* Backlog Manager */}
+            {backlogChapters.length > 0 && (
+              <section className="bg-[#ffdad6] dark:bg-red-900/20 rounded-[28px] p-6 transition-colors duration-300">
+                <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#410002] dark:text-red-300">
+                  <AlertCircle className="w-6 h-6 text-[#ba1a1a] dark:text-red-400" />
+                  High Priority Backlog
+                </h2>
+                <div className="space-y-3">
+                  {backlogChapters.map(chapter => (
+                    <div key={chapter.id} className="flex items-center justify-between bg-white/50 dark:bg-gray-800/50 p-4 rounded-[16px]">
+                      <div>
+                        <p className="font-medium text-[#1c1b1f] dark:text-gray-100">{chapter.name}</p>
+                        <p className="text-xs text-[#49454f] dark:text-gray-400 uppercase tracking-wider mt-1">{chapter.subject} • Weightage: {chapter.weightage}/10</p>
+                      </div>
+                      <button 
+                        onClick={() => toggleChapter(chapter.id)}
+                        className="bg-[#ba1a1a] hover:bg-[#93000a] dark:bg-red-600 dark:hover:bg-red-700 text-white px-4 py-2 rounded-full text-sm font-medium transition-colors"
+                      >
+                        Mark Done
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Needs Revision */}
+            {needsRevisionChapters.length > 0 && (
+              <section className="bg-[#fff8e1] dark:bg-yellow-900/20 rounded-[28px] p-6 transition-colors duration-300">
+                <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#5c4000] dark:text-yellow-300">
+                  <Zap className="w-6 h-6 text-[#fbc02d] dark:text-yellow-400" />
+                  Needs Revision (15+ Days)
+                </h2>
+                <div className="space-y-3">
+                  {needsRevisionChapters.map(chapter => (
+                    <div key={chapter.id} className="flex items-center justify-between bg-white/50 dark:bg-gray-800/50 p-4 rounded-[16px]">
+                      <div>
+                        <p className="font-medium text-[#1c1b1f] dark:text-gray-100">{chapter.name}</p>
+                        <p className="text-xs text-[#49454f] dark:text-gray-400 uppercase tracking-wider mt-1">
+                          {chapter.subject} • Last Revised: {chapter.lastRevised ? new Date(chapter.lastRevised).toLocaleDateString() : 'Never'}
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => markChapterRevised(chapter.id)}
+                        className="bg-[#fbc02d] hover:bg-[#f9a825] dark:bg-yellow-600 dark:hover:bg-yellow-700 text-[#5c4000] dark:text-yellow-50 px-4 py-2 rounded-full text-sm font-medium transition-colors"
+                      >
+                        Mark Revised
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             {/* Top 20 Goal Tracker */}
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
                 <div>
                   <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f]">
@@ -795,74 +1034,102 @@ export default function App() {
             </section>
 
             {/* Pomodoro Timer */}
-            <section className="bg-[#f3edf7] rounded-[28px] p-6 flex flex-col items-center justify-center">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 w-full text-[#1c1b1f]">
-                <Clock className="w-6 h-6 text-[#6750a4]" />
-                Study Timer
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-xl font-medium flex items-center gap-2 mb-6 text-[#1c1b1f] dark:text-gray-100">
+                <Clock className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                Focus Timer
               </h2>
-              <div className="flex gap-2 mb-6 bg-[#eaddff] p-1 rounded-full">
-                <button 
-                  onClick={() => switchTimerMode('work')}
-                  className={`px-6 py-2 text-sm font-medium rounded-full transition-colors ${timerMode === 'work' ? 'bg-[#6750a4] text-white' : 'text-[#21005d]'}`}
-                >
-                  Focus (25m)
-                </button>
-                <button 
-                  onClick={() => switchTimerMode('break')}
-                  className={`px-6 py-2 text-sm font-medium rounded-full transition-colors ${timerMode === 'break' ? 'bg-[#6750a4] text-white' : 'text-[#21005d]'}`}
-                >
-                  Break (5m)
-                </button>
-              </div>
-              <div className="text-7xl font-normal text-[#1c1b1f] mb-6 font-mono tracking-tighter">
-                {formatTime(timerTime)}
-              </div>
-              <div className="flex items-center gap-4">
-                <button 
-                  onClick={toggleTimer}
-                  className={`flex items-center gap-2 px-8 py-4 rounded-full font-medium text-white transition-colors ${isTimerRunning ? 'bg-[#ba1a1a] hover:bg-[#93000a]' : 'bg-[#6750a4] hover:bg-[#4f378b]'}`}
-                >
-                  {isTimerRunning ? <><Pause className="w-6 h-6" /> Pause</> : <><Play className="w-6 h-6" /> Start</>}
-                </button>
-                <button 
-                  onClick={resetTimer}
-                  className="p-4 text-[#49454f] hover:bg-[#eaddff] rounded-full transition-colors"
-                  title="Reset Timer"
-                >
-                  <RotateCcw className="w-6 h-6" />
-                </button>
+              
+              <div className="flex flex-col md:flex-row gap-8 items-center justify-center">
+                <div className="flex flex-col items-center">
+                  <div className="flex gap-2 mb-8 bg-[#e7e0ec] dark:bg-gray-700 p-1 rounded-full transition-colors duration-300">
+                    <button 
+                      onClick={() => switchTimerMode('work')}
+                      className={`px-6 py-2 rounded-full text-sm font-medium transition-colors ${timerMode === 'work' ? 'bg-[#6750a4] text-white shadow-sm' : 'text-[#49454f] dark:text-gray-300 hover:bg-[#d0bcff] dark:hover:bg-gray-600'}`}
+                    >
+                      Focus (25m)
+                    </button>
+                    <button 
+                      onClick={() => switchTimerMode('break')}
+                      className={`px-6 py-2 rounded-full text-sm font-medium transition-colors ${timerMode === 'break' ? 'bg-[#6750a4] text-white shadow-sm' : 'text-[#49454f] dark:text-gray-300 hover:bg-[#d0bcff] dark:hover:bg-gray-600'}`}
+                    >
+                      Break (5m)
+                    </button>
+                  </div>
+                  
+                  <div className="text-7xl sm:text-8xl font-light text-[#1c1b1f] dark:text-gray-100 mb-8 tracking-tight font-mono">
+                    {formatTime(timerTime)}
+                  </div>
+                  
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={toggleTimer}
+                      className="w-16 h-16 rounded-full bg-[#6750a4] hover:bg-[#4f378b] text-white flex items-center justify-center transition-colors shadow-md"
+                    >
+                      {isTimerRunning ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8 ml-1" />}
+                    </button>
+                    <button 
+                      onClick={resetTimer}
+                      className="w-16 h-16 rounded-full bg-[#ece6f0] dark:bg-gray-700 hover:bg-[#e8def8] dark:hover:bg-gray-600 text-[#49454f] dark:text-gray-300 flex items-center justify-center transition-colors"
+                    >
+                      <RotateCcw className="w-6 h-6" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="w-full md:w-1/2 flex flex-col gap-4">
+                  <div className="bg-[#ece6f0] dark:bg-gray-700 rounded-[24px] p-5 transition-colors duration-300">
+                    <h3 className="text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Session Notes</h3>
+                    <textarea 
+                      value={sessionNotes}
+                      onChange={(e) => setSessionNotes(e.target.value)}
+                      placeholder="Jot down distracting thoughts or key takeaways here..."
+                      className="w-full h-32 bg-transparent border-none resize-none focus:ring-0 text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none"
+                    />
+                  </div>
+                  {timerMode === 'break' && (
+                    <div className="bg-[#d3e3fd] dark:bg-blue-900/30 rounded-[24px] p-5 transition-colors duration-300">
+                      <h3 className="text-sm font-medium text-[#001d35] dark:text-blue-300 mb-2 uppercase tracking-wider flex items-center gap-2">
+                        <Zap className="w-4 h-4" /> Flashcard
+                      </h3>
+                      <p className="text-[#1c1b1f] dark:text-gray-100 font-medium text-center py-4">
+                        ∫ e^x [f(x) + f'(x)] dx = e^x f(x) + C
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
 
             {/* Overall Progress */}
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f]">
-                <TrendingUp className="w-6 h-6 text-[#6750a4]" />
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f] dark:text-gray-100">
+                <TrendingUp className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
                 Syllabus Progress
               </h2>
               
               <div className="space-y-6">
                 <div>
-                  <div className="flex justify-between text-sm mb-2 text-[#1c1b1f]">
+                  <div className="flex justify-between text-sm mb-2 text-[#1c1b1f] dark:text-gray-100">
                     <span className="font-medium">Overall</span>
                     <span className="font-medium">{overallProgress}%</span>
                   </div>
-                  <div className="w-full bg-[#eaddff] rounded-full h-4 overflow-hidden">
-                    <div className="bg-[#6750a4] h-4 rounded-full transition-all duration-500" style={{ width: `${overallProgress}%` }}></div>
+                  <div className="w-full bg-[#eaddff] dark:bg-gray-700 rounded-full h-4 overflow-hidden">
+                    <div className="bg-[#6750a4] dark:bg-purple-500 h-4 rounded-full transition-all duration-500" style={{ width: `${overallProgress}%` }}></div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-[#cac4d0]">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 border-t border-[#cac4d0] dark:border-gray-600">
                   {(['Physics', 'Chemistry', 'Mathematics'] as Subject[]).map(sub => {
                     const prog = getSubjectProgress(sub);
-                    const colorClass = sub === 'Physics' ? 'bg-[#0061a4]' : sub === 'Chemistry' ? 'bg-[#006d3a]' : 'bg-[#6750a4]';
+                    const colorClass = sub === 'Physics' ? 'bg-[#0061a4] dark:bg-blue-400' : sub === 'Chemistry' ? 'bg-[#006d3a] dark:bg-emerald-400' : 'bg-[#6750a4] dark:bg-purple-400';
                     return (
                       <div key={sub}>
                         <div className="flex justify-between text-xs mb-1.5">
-                          <span className="font-medium text-[#1c1b1f]">{sub}</span>
-                          <span className="text-[#49454f]">{prog.completed}/{prog.total}</span>
+                          <span className="font-medium text-[#1c1b1f] dark:text-gray-100">{sub}</span>
+                          <span className="text-[#49454f] dark:text-gray-400">{prog.completed}/{prog.total}</span>
                         </div>
-                        <div className="w-full bg-[#eaddff] rounded-full h-2 overflow-hidden">
+                        <div className="w-full bg-[#eaddff] dark:bg-gray-700 rounded-full h-2 overflow-hidden">
                           <div className={`${colorClass} h-2 rounded-full transition-all duration-500`} style={{ width: `${prog.percentage}%` }}></div>
                         </div>
                       </div>
@@ -873,36 +1140,36 @@ export default function App() {
             </section>
 
             {/* Activity Heatmap */}
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
-                <Flame className="w-6 h-6 text-[#ba1a1a]" />
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f] dark:text-gray-100">
+                <Flame className="w-6 h-6 text-[#ba1a1a] dark:text-red-400" />
                 30-Day Activity Heatmap
               </h2>
               <div className="flex flex-wrap gap-1.5 sm:gap-2">
                 {last30Days.map(date => {
                   const count = activityLog[date] || 0;
-                  let bg = 'bg-[#eaddff]';
-                  if (count === 1) bg = 'bg-[#d0bcff]';
-                  else if (count === 2) bg = 'bg-[#9a82db]';
-                  else if (count === 3) bg = 'bg-[#6750a4]';
-                  else if (count > 3) bg = 'bg-[#4f378b]';
+                  let bg = 'bg-[#eaddff] dark:bg-gray-700';
+                  if (count === 1) bg = 'bg-[#d0bcff] dark:bg-purple-900';
+                  else if (count === 2) bg = 'bg-[#9a82db] dark:bg-purple-700';
+                  else if (count === 3) bg = 'bg-[#6750a4] dark:bg-purple-500';
+                  else if (count > 3) bg = 'bg-[#4f378b] dark:bg-purple-400';
                   
                   return (
                     <div 
                       key={date} 
                       title={`${date}: ${count} lessons`}
-                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-[6px] ${bg} transition-colors hover:ring-2 ring-[#21005d] ring-offset-1`}
+                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-[6px] ${bg} transition-colors hover:ring-2 ring-[#21005d] dark:ring-purple-300 ring-offset-1 dark:ring-offset-gray-800`}
                     />
                   );
                 })}
               </div>
-              <div className="flex items-center gap-2 mt-4 text-xs text-[#49454f] font-medium">
+              <div className="flex items-center gap-2 mt-4 text-xs text-[#49454f] dark:text-gray-400 font-medium">
                 <span>Less</span>
-                <div className="w-3 h-3 rounded-[4px] bg-[#eaddff]"></div>
-                <div className="w-3 h-3 rounded-[4px] bg-[#d0bcff]"></div>
-                <div className="w-3 h-3 rounded-[4px] bg-[#9a82db]"></div>
-                <div className="w-3 h-3 rounded-[4px] bg-[#6750a4]"></div>
-                <div className="w-3 h-3 rounded-[4px] bg-[#4f378b]"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#eaddff] dark:bg-gray-700"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#d0bcff] dark:bg-purple-900"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#9a82db] dark:bg-purple-700"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#6750a4] dark:bg-purple-500"></div>
+                <div className="w-3 h-3 rounded-[4px] bg-[#4f378b] dark:bg-purple-400"></div>
                 <span>More</span>
               </div>
             </section>
@@ -911,40 +1178,40 @@ export default function App() {
 
         {activeTab === 'syllabus' && (
           <div className="space-y-6">
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
-                <Target className="w-6 h-6 text-[#6750a4]" />
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f] dark:text-gray-100">
+                <Target className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
                 Subject Mastery Radar
               </h2>
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
-                    <PolarGrid stroke="#cac4d0" />
-                    <PolarAngleAxis dataKey="subject" tick={{ fill: '#49454f', fontSize: 12, fontWeight: 500 }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#49454f', fontSize: 10 }} />
-                    <Radar name="Completion %" dataKey="completion" stroke="#6750a4" strokeWidth={2} fill="#6750a4" fillOpacity={0.5} />
+                    <PolarGrid stroke={isDarkMode ? '#49454f' : '#cac4d0'} />
+                    <PolarAngleAxis dataKey="subject" tick={{ fill: isDarkMode ? '#cac4d0' : '#49454f', fontSize: 12, fontWeight: 500 }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: isDarkMode ? '#cac4d0' : '#49454f', fontSize: 10 }} />
+                    <Radar name="Completion %" dataKey="completion" stroke={isDarkMode ? '#d0bcff' : '#6750a4'} strokeWidth={2} fill={isDarkMode ? '#d0bcff' : '#6750a4'} fillOpacity={0.5} />
                     <Tooltip 
-                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#ece6f0' }}
-                      itemStyle={{ color: '#6750a4', fontWeight: '500' }}
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: isDarkMode ? '#332d41' : '#ece6f0', color: isDarkMode ? '#e6e1e5' : '#1c1b1f' }}
+                      itemStyle={{ color: isDarkMode ? '#d0bcff' : '#6750a4', fontWeight: '500' }}
                     />
                   </RadarChart>
                 </ResponsiveContainer>
               </div>
             </section>
 
-            <div className="bg-[#fdfcff] rounded-[28px] shadow-sm border border-[#cac4d0] overflow-hidden">
-              <div className="p-6 border-b border-[#cac4d0] bg-[#ece6f0]">
-                <h2 className="text-lg font-medium text-[#1c1b1f]">Full Syllabus Tracker</h2>
-                <p className="text-sm text-[#49454f] mt-1">Update your progress and chapter difficulty here to adjust your daily plan automatically.</p>
+            <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] shadow-sm border border-[#cac4d0] dark:border-gray-700 overflow-hidden transition-colors duration-300">
+              <div className="p-6 border-b border-[#cac4d0] dark:border-gray-700 bg-[#ece6f0] dark:bg-gray-800 transition-colors duration-300">
+                <h2 className="text-lg font-medium text-[#1c1b1f] dark:text-gray-100">Full Syllabus Tracker</h2>
+                <p className="text-sm text-[#49454f] dark:text-gray-400 mt-1">Update your progress, difficulty, and confidence here.</p>
               </div>
             
-            <div className="divide-y divide-[#cac4d0]">
+            <div className="divide-y divide-[#cac4d0] dark:divide-gray-700">
               {(['Physics', 'Chemistry', 'Mathematics'] as Subject[]).map(subject => (
                 <div key={subject} className="p-6">
-                  <h3 className="font-medium text-lg mb-4 flex items-center gap-2 text-[#1c1b1f]">
+                  <h3 className="font-medium text-lg mb-4 flex items-center gap-2 text-[#1c1b1f] dark:text-gray-100">
                     <div className={`w-3 h-3 rounded-full ${
-                      subject === 'Physics' ? 'bg-[#0061a4]' : 
-                      subject === 'Chemistry' ? 'bg-[#006d3a]' : 'bg-[#6750a4]'
+                      subject === 'Physics' ? 'bg-[#0061a4] dark:bg-blue-400' : 
+                      subject === 'Chemistry' ? 'bg-[#006d3a] dark:bg-emerald-400' : 'bg-[#6750a4] dark:bg-purple-400'
                     }`} />
                     {subject}
                   </h3>
@@ -961,26 +1228,26 @@ export default function App() {
                             onClick={() => toggleChapter(chapter.id)}
                             className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-[16px] cursor-pointer transition-all ${
                               chapter.completed 
-                                ? 'bg-[#f3edf7] opacity-60' 
-                                : 'bg-[#fdfcff] border border-[#cac4d0] hover:bg-[#ece6f0]'
+                                ? 'bg-[#f3edf7] dark:bg-gray-800/60 opacity-60' 
+                                : 'bg-[#fdfcff] dark:bg-gray-800 border border-[#cac4d0] dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-700'
                             }`}
                           >
                             <div className="flex items-start sm:items-center gap-3 mb-3 sm:mb-0">
                               {chapter.completed ? (
-                                <CheckCircle2 className="w-6 h-6 text-[#6750a4] shrink-0 mt-0.5 sm:mt-0" />
+                                <CheckCircle2 className="w-6 h-6 text-[#6750a4] dark:text-purple-400 shrink-0 mt-0.5 sm:mt-0" />
                               ) : (
-                                <Circle className="w-6 h-6 text-[#49454f] shrink-0 mt-0.5 sm:mt-0" />
+                                <Circle className="w-6 h-6 text-[#49454f] dark:text-gray-400 shrink-0 mt-0.5 sm:mt-0" />
                               )}
                               <div>
-                                <p className={`font-medium ${chapter.completed ? 'line-through text-[#49454f]' : 'text-[#1c1b1f]'}`}>
+                                <p className={`font-medium ${chapter.completed ? 'line-through text-[#49454f] dark:text-gray-500' : 'text-[#1c1b1f] dark:text-gray-100'}`}>
                                   {chapter.name}
                                 </p>
                                 <div className="flex items-center gap-4 mt-1.5 flex-wrap">
-                                  <span className="text-xs font-medium text-[#49454f]">
+                                  <span className="text-xs font-medium text-[#49454f] dark:text-gray-400">
                                     Weightage: {chapter.weightage}/10
                                   </span>
                                   {isTop20 && (
-                                    <span className="text-[10px] font-medium uppercase tracking-wider text-[#410002] bg-[#ffdad6] px-2 py-1 rounded-full">
+                                    <span className="text-[10px] font-medium uppercase tracking-wider text-[#410002] dark:text-red-200 bg-[#ffdad6] dark:bg-red-900/50 px-2 py-1 rounded-full">
                                       Top 20
                                     </span>
                                   )}
@@ -988,21 +1255,36 @@ export default function App() {
                               </div>
                             </div>
                             
-                            {/* Difficulty Selector */}
-                            <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto mt-3 sm:mt-0 pl-8 sm:pl-0 gap-1" onClick={e => e.stopPropagation()}>
-                              <span className="text-xs font-medium text-[#49454f] mr-1">Difficulty:</span>
-                              <div className="flex">
-                                {[1, 2, 3, 4, 5].map(star => (
-                                  <button
-                                    key={star}
-                                    onClick={() => setChapterDifficulty(chapter.id, star)}
-                                    className={`p-1 transition-colors rounded-full hover:bg-[#eaddff] ${
-                                      chapter.difficulty >= star ? 'text-[#6750a4]' : 'text-[#cac4d0] hover:text-[#6750a4]'
-                                    }`}
-                                  >
-                                    <Star className={`w-4 h-4 sm:w-5 sm:h-5 ${chapter.difficulty >= star ? 'fill-current' : ''}`} />
-                                  </button>
-                                ))}
+                            {/* Difficulty & Confidence Selector */}
+                            <div className="flex flex-col sm:items-end w-full sm:w-auto mt-3 sm:mt-0 pl-8 sm:pl-0 gap-2" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center justify-between sm:justify-end w-full gap-1">
+                                <span className="text-xs font-medium text-[#49454f] dark:text-gray-400 mr-1">Difficulty:</span>
+                                <div className="flex">
+                                  {[1, 2, 3, 4, 5].map(star => (
+                                    <button
+                                      key={star}
+                                      onClick={() => setChapterDifficulty(chapter.id, star)}
+                                      className={`p-1 transition-colors rounded-full hover:bg-[#eaddff] dark:hover:bg-purple-900/50 ${
+                                        chapter.difficulty >= star ? 'text-[#6750a4] dark:text-purple-400' : 'text-[#cac4d0] dark:text-gray-600 hover:text-[#6750a4] dark:hover:text-purple-400'
+                                      }`}
+                                    >
+                                      <Star className={`w-4 h-4 sm:w-5 sm:h-5 ${chapter.difficulty >= star ? 'fill-current' : ''}`} />
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center justify-between sm:justify-end w-full gap-2">
+                                <span className="text-xs font-medium text-[#49454f] dark:text-gray-400">Confidence:</span>
+                                <select 
+                                  value={chapter.confidence || 'Medium'}
+                                  onChange={(e) => setChapterConfidence(chapter.id, e.target.value as Confidence)}
+                                  className="text-xs bg-transparent border border-[#cac4d0] dark:border-gray-600 rounded-md px-2 py-1 text-[#1c1b1f] dark:text-gray-100 focus:outline-none focus:border-[#6750a4] dark:focus:border-purple-400"
+                                >
+                                  <option value="Low">Low</option>
+                                  <option value="Medium">Medium</option>
+                                  <option value="High">High</option>
+                                </select>
                               </div>
                             </div>
                           </div>
@@ -1018,94 +1300,228 @@ export default function App() {
 
         {activeTab === 'tests' && (
           <div className="space-y-6">
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
-                <TrendingUp className="w-6 h-6 text-[#6750a4]" />
-                Score Trend
-              </h2>
+            {predictedPercentile && (
+              <div className="bg-[#eaddff] dark:bg-purple-900/30 rounded-[28px] p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between transition-colors duration-300 gap-4">
+                <div>
+                  <h3 className="text-sm font-medium text-[#21005d] dark:text-purple-300 uppercase tracking-wider mb-1">Predicted Percentile</h3>
+                  <p className="text-[#49454f] dark:text-gray-400 text-sm">Based on your latest mock test score of {mockTests[0]?.score}/300</p>
+                </div>
+                <div className="text-4xl font-bold text-[#6750a4] dark:text-purple-400">
+                  {predictedPercentile}%
+                </div>
+              </div>
+            )}
+
+            {testInsights && testInsights.primaryIssue !== 'None' && (
+              <div className="bg-[#ffdad6] dark:bg-red-900/20 rounded-[28px] p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between transition-colors duration-300 gap-4">
+                <div>
+                  <h3 className="text-sm font-medium text-[#410002] dark:text-red-300 uppercase tracking-wider mb-1">Diagnostic Insight</h3>
+                  <p className="text-[#49454f] dark:text-gray-400 text-sm">
+                    You've lost {testInsights.maxErrors} marks recently to <strong className="text-[#ba1a1a] dark:text-red-400">{testInsights.primaryIssue} errors</strong>. Focus on improving this area.
+                  </p>
+                </div>
+                <AlertCircle className="w-8 h-8 text-[#ba1a1a] dark:text-red-400 shrink-0" />
+              </div>
+            )}
+
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-4">
+                <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f] dark:text-gray-100">
+                  <TrendingUp className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                  Score Trend
+                </h2>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-[#49454f] dark:text-gray-400">Goal Score:</span>
+                  <input 
+                    type="number" 
+                    value={goalScore}
+                    onChange={(e) => setGoalScore(parseInt(e.target.value) || 0)}
+                    className="w-20 bg-transparent border border-[#cac4d0] dark:border-gray-600 rounded-md px-2 py-1 text-sm text-[#1c1b1f] dark:text-gray-100 focus:outline-none focus:border-[#6750a4] dark:focus:border-purple-400"
+                    min="0"
+                    max="300"
+                  />
+                </div>
+              </div>
               <div className="h-64 w-full">
                 {mockTests.length > 1 ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={testChartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#cac4d0" vertical={false} />
-                      <XAxis dataKey="name" stroke="#49454f" fontSize={12} tickLine={false} axisLine={false} />
-                      <YAxis domain={[0, 180]} stroke="#49454f" fontSize={12} tickLine={false} axisLine={false} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#49454f' : '#cac4d0'} vertical={false} />
+                      <XAxis dataKey="name" stroke={isDarkMode ? '#cac4d0' : '#49454f'} fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis domain={[0, 300]} stroke={isDarkMode ? '#cac4d0' : '#49454f'} fontSize={12} tickLine={false} axisLine={false} />
                       <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: '#ece6f0' }}
-                        labelStyle={{ fontWeight: '500', color: '#1c1b1f', marginBottom: '4px' }}
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: isDarkMode ? '#332d41' : '#ece6f0', color: isDarkMode ? '#e6e1e5' : '#1c1b1f' }}
+                        labelStyle={{ fontWeight: '500', color: isDarkMode ? '#e6e1e5' : '#1c1b1f', marginBottom: '4px' }}
                       />
-                      <Line type="monotone" dataKey="score" name="Score" stroke="#6750a4" strokeWidth={3} dot={{ r: 4, fill: '#6750a4', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                      <Line type="monotone" dataKey="score" name="Score" stroke={isDarkMode ? '#d0bcff' : '#6750a4'} strokeWidth={3} dot={{ r: 4, fill: isDarkMode ? '#d0bcff' : '#6750a4', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} />
+                      <Line type="monotone" dataKey={() => goalScore} name="Goal" stroke={isDarkMode ? '#4ade80' : '#16a34a'} strokeWidth={2} strokeDasharray="5 5" dot={false} activeDot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-[#49454f] text-sm bg-[#ece6f0] rounded-[24px] border border-dashed border-[#cac4d0]">
-                    <BarChart className="w-8 h-8 mb-2 text-[#49454f]" />
+                  <div className="h-full flex flex-col items-center justify-center text-[#49454f] dark:text-gray-400 text-sm bg-[#ece6f0] dark:bg-gray-700 rounded-[24px] border border-dashed border-[#cac4d0] dark:border-gray-500 transition-colors duration-300">
+                    <BarChart className="w-8 h-8 mb-2 text-[#49454f] dark:text-gray-400" />
                     <p>Log at least 2 tests to see your trend.</p>
                   </div>
                 )}
               </div>
             </section>
 
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f]">
-                <Activity className="w-6 h-6 text-[#6750a4]" />
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f] dark:text-gray-100">
+                <Activity className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
                 Log Mock Test Score
               </h2>
               <form 
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const form = e.target as HTMLFormElement;
-                  const scoreInput = form.elements.namedItem('score') as HTMLInputElement;
-                  const score = parseInt(scoreInput.value, 10);
-                  if (!isNaN(score) && score >= 0 && score <= 300) {
-                    setMockTests(prev => [{ id: Date.now().toString(), date: todayStr, score }, ...prev]);
-                    scoreInput.value = '';
+                  const pScore = parseInt(mtPhysics, 10) || 0;
+                  const cScore = parseInt(mtChemistry, 10) || 0;
+                  const mScore = parseInt(mtMath, 10) || 0;
+                  const totalScore = pScore + cScore + mScore;
+                  
+                  if (totalScore >= 0 && totalScore <= 300) {
+                    setMockTests(prev => [{ 
+                      id: Date.now().toString(), 
+                      date: todayStr, 
+                      score: totalScore,
+                      physicsScore: pScore,
+                      chemistryScore: cScore,
+                      mathScore: mScore,
+                      conceptualErrors: parseInt(mtConceptual, 10) || 0,
+                      calculationErrors: parseInt(mtCalculation, 10) || 0,
+                      timeErrors: parseInt(mtTime, 10) || 0,
+                      notes: mtNotes
+                    }, ...prev]);
+                    
+                    setMtPhysics('');
+                    setMtChemistry('');
+                    setMtMath('');
+                    setMtConceptual('');
+                    setMtCalculation('');
+                    setMtTime('');
+                    setMtNotes('');
                   }
                 }}
-                className="flex gap-4 items-end"
+                className="space-y-6"
               >
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-[#49454f] mb-1">Score (out of 180)</label>
-                  <input 
-                    type="number" 
-                    name="score"
-                    min="0" 
-                    max="180" 
-                    required
-                    className="w-full px-4 py-3 bg-[#ece6f0] border-b-2 border-[#49454f] rounded-t-[4px] focus:border-[#6750a4] outline-none transition-all text-[#1c1b1f]"
-                    placeholder="e.g. 100"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-1">Physics Score</label>
+                    <input 
+                      type="number" 
+                      value={mtPhysics}
+                      onChange={e => setMtPhysics(e.target.value)}
+                      min="0" max="100" required
+                      className="w-full px-4 py-3 bg-[#ece6f0] dark:bg-gray-700 border-b-2 border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none transition-all text-[#1c1b1f] dark:text-gray-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-1">Chemistry Score</label>
+                    <input 
+                      type="number" 
+                      value={mtChemistry}
+                      onChange={e => setMtChemistry(e.target.value)}
+                      min="0" max="100" required
+                      className="w-full px-4 py-3 bg-[#ece6f0] dark:bg-gray-700 border-b-2 border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none transition-all text-[#1c1b1f] dark:text-gray-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-1">Math Score</label>
+                    <input 
+                      type="number" 
+                      value={mtMath}
+                      onChange={e => setMtMath(e.target.value)}
+                      min="0" max="100" required
+                      className="w-full px-4 py-3 bg-[#ece6f0] dark:bg-gray-700 border-b-2 border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none transition-all text-[#1c1b1f] dark:text-gray-100"
+                    />
+                  </div>
                 </div>
-                <button 
-                  type="submit"
-                  className="bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium px-6 py-3 rounded-full transition-colors h-[48px] flex items-center"
-                >
-                  Log Score
-                </button>
+
+                <div>
+                  <h3 className="text-sm font-medium text-[#1c1b1f] dark:text-gray-100 mb-3">Error Analysis (Number of Questions)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs text-[#49454f] dark:text-gray-400 mb-1">Conceptual Errors</label>
+                      <input 
+                        type="number" value={mtConceptual} onChange={e => setMtConceptual(e.target.value)} min="0"
+                        className="w-full px-3 py-2 bg-[#ece6f0] dark:bg-gray-700 border-b border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none text-sm text-[#1c1b1f] dark:text-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#49454f] dark:text-gray-400 mb-1">Calculation Errors</label>
+                      <input 
+                        type="number" value={mtCalculation} onChange={e => setMtCalculation(e.target.value)} min="0"
+                        className="w-full px-3 py-2 bg-[#ece6f0] dark:bg-gray-700 border-b border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none text-sm text-[#1c1b1f] dark:text-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-[#49454f] dark:text-gray-400 mb-1">Time Management Errors</label>
+                      <input 
+                        type="number" value={mtTime} onChange={e => setMtTime(e.target.value)} min="0"
+                        className="w-full px-3 py-2 bg-[#ece6f0] dark:bg-gray-700 border-b border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none text-sm text-[#1c1b1f] dark:text-gray-100"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4 items-end">
+                  <div className="flex-1 w-full">
+                    <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-1">Test Notes / Takeaways</label>
+                    <input 
+                      type="text" 
+                      value={mtNotes}
+                      onChange={e => setMtNotes(e.target.value)}
+                      className="w-full px-4 py-3 bg-[#ece6f0] dark:bg-gray-700 border-b-2 border-[#49454f] dark:border-gray-500 rounded-t-[4px] focus:border-[#6750a4] dark:focus:border-purple-400 outline-none transition-all text-[#1c1b1f] dark:text-gray-100"
+                      placeholder="e.g. Need to revise Optics formulas..."
+                    />
+                  </div>
+                  <button 
+                    type="submit"
+                    className="w-full sm:w-auto bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium px-8 py-3 rounded-full transition-colors h-[48px] flex items-center justify-center shrink-0"
+                  >
+                    Log Score
+                  </button>
+                </div>
               </form>
             </section>
 
-            <section className="bg-[#f3edf7] rounded-[28px] p-6">
-              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f]">
-                <BarChart className="w-6 h-6 text-[#6750a4]" />
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f] dark:text-gray-100">
+                <BarChart className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
                 Past Scores
               </h2>
               {mockTests.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {mockTests.map(test => (
-                    <div key={test.id} className="flex items-center justify-between p-4 rounded-[24px] bg-[#ece6f0]">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-[#eaddff] flex items-center justify-center font-medium text-[#21005d]">
-                          {Math.round((test.score / 180) * 100)}%
+                    <div key={test.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-[24px] bg-[#ece6f0] dark:bg-gray-700 transition-colors duration-300 gap-4">
+                      <div className="flex items-start sm:items-center gap-4">
+                        <div className="w-14 h-14 rounded-full bg-[#eaddff] dark:bg-purple-900/50 flex items-center justify-center font-bold text-[#21005d] dark:text-purple-200 shrink-0">
+                          {Math.round((test.score / 300) * 100)}%
                         </div>
                         <div>
-                          <p className="font-medium text-[#1c1b1f]">{test.score} / 180</p>
-                          <p className="text-xs text-[#49454f]">{new Date(test.date).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          <p className="font-bold text-lg text-[#1c1b1f] dark:text-gray-100">{test.score} <span className="text-sm font-normal text-[#49454f] dark:text-gray-400">/ 300</span></p>
+                          <p className="text-xs text-[#49454f] dark:text-gray-400 mb-2">{new Date(test.date).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                          
+                          {(test.physicsScore !== undefined || test.conceptualErrors !== undefined) && (
+                            <div className="flex flex-wrap gap-2 text-xs">
+                              {test.physicsScore !== undefined && (
+                                <span className="bg-[#d3e3fd] dark:bg-blue-900/30 text-[#001d35] dark:text-blue-300 px-2 py-1 rounded-md">P: {test.physicsScore} | C: {test.chemistryScore} | M: {test.mathScore}</span>
+                              )}
+                              {(test.conceptualErrors || test.calculationErrors || test.timeErrors) ? (
+                                <span className="bg-[#ffdad6] dark:bg-red-900/30 text-[#410002] dark:text-red-300 px-2 py-1 rounded-md">
+                                  Errors: {test.conceptualErrors}C, {test.calculationErrors}M, {test.timeErrors}T
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
+                          {test.notes && (
+                            <p className="text-sm text-[#49454f] dark:text-gray-300 mt-2 italic">"{test.notes}"</p>
+                          )}
                         </div>
                       </div>
                       <button 
                         onClick={() => setMockTests(prev => prev.filter(t => t.id !== test.id))}
-                        className="text-sm text-[#ba1a1a] hover:text-[#93000a] font-medium px-4 py-2 rounded-full hover:bg-[#ffdad6] transition-colors"
+                        className="text-sm text-[#ba1a1a] dark:text-red-400 hover:text-[#93000a] dark:hover:text-red-300 font-medium px-4 py-2 rounded-full hover:bg-[#ffdad6] dark:hover:bg-red-900/50 transition-colors self-end sm:self-auto"
                       >
                         Delete
                       </button>
@@ -1113,12 +1529,74 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-[#49454f]">
-                  <Activity className="w-12 h-12 mx-auto mb-3 text-[#cac4d0]" />
+                <div className="text-center py-8 text-[#49454f] dark:text-gray-400">
+                  <Activity className="w-12 h-12 mx-auto mb-3 text-[#cac4d0] dark:text-gray-600" />
                   <p>No mock tests logged yet.</p>
                   <p className="text-sm">Log your first score above to start tracking your performance!</p>
                 </div>
               )}
+            </section>
+
+            {/* Subject Scores Trend */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f] dark:text-gray-100">
+                <TrendingUp className="w-6 h-6 text-[#0061a4] dark:text-blue-400" />
+                Subject-Wise Trend
+              </h2>
+              <div className="h-64 w-full">
+                {mockTests.length > 1 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={testChartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#49454f' : '#cac4d0'} vertical={false} />
+                      <XAxis dataKey="name" stroke={isDarkMode ? '#cac4d0' : '#49454f'} fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis domain={[0, 100]} stroke={isDarkMode ? '#cac4d0' : '#49454f'} fontSize={12} tickLine={false} axisLine={false} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: isDarkMode ? '#332d41' : '#ece6f0', color: isDarkMode ? '#e6e1e5' : '#1c1b1f' }}
+                        labelStyle={{ fontWeight: '500', color: isDarkMode ? '#e6e1e5' : '#1c1b1f', marginBottom: '4px' }}
+                      />
+                      <Line type="monotone" dataKey="physics" name="Physics" stroke={isDarkMode ? '#60a5fa' : '#0061a4'} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="chemistry" name="Chemistry" stroke={isDarkMode ? '#34d399' : '#006d3a'} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="math" name="Math" stroke={isDarkMode ? '#c084fc' : '#6750a4'} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-[#49454f] dark:text-gray-400 text-sm bg-[#ece6f0] dark:bg-gray-700 rounded-[24px] border border-dashed border-[#cac4d0] dark:border-gray-500 transition-colors duration-300">
+                    <BarChart className="w-8 h-8 mb-2 text-[#49454f] dark:text-gray-400" />
+                    <p>Log at least 2 tests to see your trend.</p>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Error Trends */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-4 text-[#1c1b1f] dark:text-gray-100">
+                <Activity className="w-6 h-6 text-[#ba1a1a] dark:text-red-400" />
+                Error Analysis Trend
+              </h2>
+              <div className="h-64 w-full">
+                {mockTests.length > 1 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={testChartData} margin={{ top: 5, right: 20, bottom: 5, left: -20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#49454f' : '#cac4d0'} vertical={false} />
+                      <XAxis dataKey="name" stroke={isDarkMode ? '#cac4d0' : '#49454f'} fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke={isDarkMode ? '#cac4d0' : '#49454f'} fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', backgroundColor: isDarkMode ? '#332d41' : '#ece6f0', color: isDarkMode ? '#e6e1e5' : '#1c1b1f' }}
+                        labelStyle={{ fontWeight: '500', color: isDarkMode ? '#e6e1e5' : '#1c1b1f', marginBottom: '4px' }}
+                      />
+                      <Line type="monotone" dataKey="conceptual" name="Conceptual" stroke={isDarkMode ? '#f87171' : '#ba1a1a'} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="calculation" name="Calculation" stroke={isDarkMode ? '#fb923c' : '#b45309'} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="time" name="Time Management" stroke={isDarkMode ? '#94a3b8' : '#475569'} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-[#49454f] dark:text-gray-400 text-sm bg-[#ece6f0] dark:bg-gray-700 rounded-[24px] border border-dashed border-[#cac4d0] dark:border-gray-500 transition-colors duration-300">
+                    <BarChart className="w-8 h-8 mb-2 text-[#49454f] dark:text-gray-400" />
+                    <p>Log at least 2 tests to see your trend.</p>
+                  </div>
+                )}
+              </div>
             </section>
           </div>
         )}
