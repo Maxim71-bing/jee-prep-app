@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { GoogleGenAI, Type } from "@google/genai";
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
@@ -50,6 +51,22 @@ const DecayTimerDisplay = ({ lastRevisionDate, confidenceScore }: { lastRevision
 };
 
 // --- Types ---
+export interface ScheduleTask {
+  id: string;
+  chapterId: string;
+  chapterName: string;
+  subTopic: string;
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+  completed: boolean;
+}
+
+export interface DailySchedule {
+  date: string;
+  tasks: ScheduleTask[];
+}
+
 interface MockTest {
   id: string;
   date: string;
@@ -129,12 +146,14 @@ export default function App() {
 
   // --- App State ---
   const [chapters, setChapters] = useState<Chapter[]>(INITIAL_CHAPTERS);
-  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests' | 'path'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests' | 'path' | 'schedule'>('plan');
   const [dailyPlan, setDailyPlan] = useState<{date: string, chapterIds: string[]}>({ date: '', chapterIds: [] });
   const [streak, setStreak] = useState<{count: number, lastActivityDate: string}>({ count: 0, lastActivityDate: '' });
   const [mockTests, setMockTests] = useState<MockTest[]>([]);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
   const [dailyBig3, setDailyBig3] = useState<{date: string, tasks: {id: string, text: string, completed: boolean}[]}>({ date: '', tasks: [] });
+  const [dailySchedule, setDailySchedule] = useState<DailySchedule>({ date: '', tasks: [] });
+  const [isGeneratingSchedule, setIsGeneratingSchedule] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [goalScore, setGoalScore] = useState<number>(200);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
@@ -282,9 +301,9 @@ export default function App() {
   // 2. Save user data whenever chapters change
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration }));
+      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, dailySchedule }));
     }
-  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, currentUser]);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, dailySchedule, currentUser]);
 
   const loadUserData = (user: string) => {
     setIsLoading(true);
@@ -301,6 +320,7 @@ export default function App() {
           setDailyBig3({ date: '', tasks: [] });
           setGoalScore(200);
           setSavedSessions([]);
+          setDailySchedule({ date: '', tasks: [] });
         } else {
           setChapters(parsed.chapters || INITIAL_CHAPTERS);
           setDailyPlan(parsed.dailyPlan || { date: '', chapterIds: [] });
@@ -310,6 +330,7 @@ export default function App() {
           setDailyBig3(parsed.dailyBig3 || { date: '', tasks: [] });
           setGoalScore(parsed.goalScore || 200);
           setSavedSessions(parsed.savedSessions || []);
+          setDailySchedule(parsed.dailySchedule || { date: '', tasks: [] });
           if (parsed.workDuration) setWorkDuration(parsed.workDuration);
           if (parsed.breakDuration) setBreakDuration(parsed.breakDuration);
         }
@@ -371,6 +392,124 @@ export default function App() {
     setPassword('');
     setAuthError('');
   }, []);
+
+  const generateSmartSchedule = async (isReschedule: boolean = false) => {
+    if (!dailyPlan.chapterIds.length) return;
+    setIsGeneratingSchedule(true);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      let chaptersToSchedule = chapters.filter(c => dailyPlan.chapterIds.includes(c.id));
+      let existingTasks: ScheduleTask[] = [];
+      
+      if (isReschedule) {
+        existingTasks = dailySchedule.tasks.filter(t => t.completed);
+        const uncompletedTasks = dailySchedule.tasks.filter(t => !t.completed);
+        const uncompletedChapterIds = [...new Set(uncompletedTasks.map(t => t.chapterId))];
+        chaptersToSchedule = chapters.filter(c => uncompletedChapterIds.includes(c.id));
+      }
+
+      const chapterDetails = chaptersToSchedule.map(c => ({
+        id: c.id,
+        name: c.name,
+        subject: c.subject,
+        difficulty: c.confidenceScore <= 2 ? 'High' : c.confidenceScore === 3 ? 'Medium' : 'Low'
+      }));
+
+      const now = new Date();
+      const currentHour = now.getHours();
+      const remainingHours = Math.max(1, 24 - currentHour);
+
+      const prompt = `Create a detailed study schedule for a JEE student.
+      They have ${remainingHours} hours left today.
+      They need to study the following chapters: ${JSON.stringify(chapterDetails)}.
+      CRITICAL: Do not just say "Study chapter X". Break down each chapter into specific, actionable sub-topics or concepts to study. For example, instead of "Study Rotational Motion", use "Study Moment of Inertia and Torque".
+      Allocate time based on difficulty (High difficulty needs more time).
+      Return the schedule as a JSON array of tasks.
+      Start the schedule from the current time: ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}.
+      Ensure the total duration does not exceed ${remainingHours * 60} minutes.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                chapterId: { type: Type.STRING, description: "ID of the chapter" },
+                chapterName: { type: Type.STRING, description: "Name of the chapter" },
+                subTopic: { type: Type.STRING, description: "Specific sub-topic or part of the lesson to study" },
+                startTime: { type: Type.STRING, description: "Start time in HH:MM format" },
+                endTime: { type: Type.STRING, description: "End time in HH:MM format" },
+                durationMinutes: { type: Type.NUMBER, description: "Duration in minutes" }
+              },
+              required: ["chapterId", "chapterName", "subTopic", "startTime", "endTime", "durationMinutes"]
+            }
+          }
+        }
+      });
+
+      const generatedTasks = JSON.parse(response.text || "[]");
+      const newTasks: ScheduleTask[] = generatedTasks.map((t: any) => ({
+        ...t,
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        completed: false
+      }));
+
+      setDailySchedule({
+        date: new Date().toISOString().split('T')[0],
+        tasks: isReschedule ? [...existingTasks, ...newTasks] : newTasks
+      });
+    } catch (error) {
+      console.error("Failed to generate schedule:", error);
+    } finally {
+      setIsGeneratingSchedule(false);
+    }
+  };
+
+  const toggleScheduleTask = (taskId: string) => {
+    setDailySchedule(prev => ({
+      ...prev,
+      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t)
+    }));
+  };
+
+  const migrateIncompleteTasks = () => {
+    const incompleteTasks = dailySchedule.tasks.filter(t => !t.completed);
+    if (incompleteTasks.length === 0) return;
+
+    const incompleteChapterIds = [...new Set(incompleteTasks.map(t => t.chapterId))];
+    
+    // Add to tomorrow's plan
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    
+    setDailyPlan(prev => {
+      // If we already have a plan for tomorrow, append to it
+      if (prev.date === tomorrowStr) {
+        return {
+          ...prev,
+          chapterIds: [...new Set([...prev.chapterIds, ...incompleteChapterIds])]
+        };
+      }
+      // Otherwise create a new plan for tomorrow
+      return {
+        date: tomorrowStr,
+        chapterIds: incompleteChapterIds
+      };
+    });
+
+    // Clear incomplete tasks from today's schedule
+    setDailySchedule(prev => ({
+      ...prev,
+      tasks: prev.tasks.filter(t => t.completed)
+    }));
+  };
 
   const handleLogout = useCallback(() => {
     setCurrentUser(null);
@@ -1001,6 +1140,15 @@ export default function App() {
           >
             <TrendingUp className="w-4 h-4" />
             Path Travelled
+          </button>
+          <button
+            onClick={() => setActiveTab('schedule')}
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+              activeTab === 'schedule' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/80 dark:text-purple-200' : 'bg-transparent border border-[#79747e] text-[#49454f] dark:text-gray-300 dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            Smart Schedule
           </button>
         </div>
 
@@ -1809,6 +1957,81 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'schedule' && (
+          <div className="space-y-6">
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f] dark:text-gray-100">
+                  <Clock className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                  Smart Schedule
+                </h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => generateSmartSchedule(false)}
+                    disabled={isGeneratingSchedule || dailyPlan.chapterIds.length === 0}
+                    className="px-4 py-2 text-sm font-medium rounded-full bg-[#6750a4] text-white hover:bg-[#4f378b] disabled:opacity-50 transition-colors"
+                  >
+                    {isGeneratingSchedule ? 'Generating...' : 'Generate New'}
+                  </button>
+                  {dailySchedule.tasks.length > 0 && (
+                    <button
+                      onClick={() => generateSmartSchedule(true)}
+                      disabled={isGeneratingSchedule}
+                      className="px-4 py-2 text-sm font-medium rounded-full bg-[#ece6f0] dark:bg-gray-700 text-[#49454f] dark:text-gray-300 hover:bg-[#e8def8] dark:hover:bg-gray-600 disabled:opacity-50 transition-colors"
+                    >
+                      Reschedule
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {dailyPlan.chapterIds.length === 0 ? (
+                <div className="text-center py-12 bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] border border-[#cac4d0] dark:border-gray-700">
+                  <Target className="w-12 h-12 text-[#cac4d0] dark:text-gray-600 mx-auto mb-4" />
+                  <p className="text-[#49454f] dark:text-gray-400 font-medium">No chapters planned for today.</p>
+                  <p className="text-sm text-[#79747e] dark:text-gray-500 mt-1">Add chapters to your Daily Plan first.</p>
+                </div>
+              ) : dailySchedule.tasks.length === 0 ? (
+                <div className="text-center py-12 bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] border border-[#cac4d0] dark:border-gray-700">
+                  <Clock className="w-12 h-12 text-[#cac4d0] dark:text-gray-600 mx-auto mb-4" />
+                  <p className="text-[#49454f] dark:text-gray-400 font-medium">Schedule not generated yet.</p>
+                  <p className="text-sm text-[#79747e] dark:text-gray-500 mt-1">Click Generate New to create your smart schedule.</p>
+                </div>
+              ) : (
+                <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-[#cac4d0] dark:before:via-gray-700 before:to-transparent">
+                  {dailySchedule.tasks.map((task, index) => (
+                    <div key={task.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                      <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-[#f3edf7] dark:border-gray-800 bg-[#eaddff] dark:bg-purple-900 text-[#21005d] dark:text-purple-200 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10 cursor-pointer" onClick={() => toggleScheduleTask(task.id)}>
+                        {task.completed ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                      </div>
+                      <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-[#fdfcff] dark:bg-gray-900 p-4 rounded-[24px] border border-[#cac4d0] dark:border-gray-700 shadow-sm transition-all duration-300 hover:shadow-md">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-sm font-bold text-[#6750a4] dark:text-purple-400 ${task.completed ? 'line-through opacity-50' : ''}`}>{task.startTime} - {task.endTime}</span>
+                          <span className="text-xs font-medium text-[#79747e] dark:text-gray-500 bg-[#ece6f0] dark:bg-gray-800 px-2 py-1 rounded-full">{task.durationMinutes}m</span>
+                        </div>
+                        <h3 className={`font-medium text-[#1c1b1f] dark:text-gray-100 mb-1 ${task.completed ? 'line-through opacity-50' : ''}`}>{task.chapterName}</h3>
+                        <p className={`text-sm text-[#49454f] dark:text-gray-400 ${task.completed ? 'line-through opacity-50' : ''}`}>{task.subTopic}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {dailySchedule.tasks.length > 0 && dailySchedule.tasks.some(t => !t.completed) && (
+                <div className="mt-8 flex justify-center">
+                  <button
+                    onClick={migrateIncompleteTasks}
+                    className="px-6 py-3 rounded-full font-medium text-[#6750a4] dark:text-purple-400 bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#eaddff] dark:hover:bg-purple-900/30 transition-colors flex items-center gap-2"
+                  >
+                    <TrendingUp className="w-5 h-5" />
+                    Migrate Incomplete to Tomorrow
+                  </button>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
         {activeTab === 'path' && (
           <div className="space-y-6">
             <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
@@ -1932,6 +2155,17 @@ export default function App() {
             <TrendingUp className="w-6 h-6" />
           </div>
           <span className="text-[10px] font-medium">Path</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('schedule')}
+          className={`flex flex-col items-center p-2 min-w-[64px] rounded-xl transition-colors ${
+            activeTab === 'schedule' ? 'text-[#21005d] dark:text-purple-300' : 'text-[#49454f] dark:text-gray-400 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+          }`}
+        >
+          <div className={`px-4 py-1 rounded-full mb-1 transition-colors ${activeTab === 'schedule' ? 'bg-[#eaddff] dark:bg-purple-900/80' : 'bg-transparent'}`}>
+            <Clock className="w-6 h-6" />
+          </div>
+          <span className="text-[10px] font-medium">Schedule</span>
         </button>
       </div>
 
