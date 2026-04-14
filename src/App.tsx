@@ -153,7 +153,7 @@ export default function App() {
     };
   }, []);
 
-  const playBeep = () => {
+  const playSoothingChime = () => {
     try {
       if (!audioCtxRef.current) {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -165,25 +165,40 @@ export default function App() {
         ctx.resume();
       }
       
-      const oscillator = ctx.createOscillator();
-      const gainNode = ctx.createGain();
+      const now = ctx.currentTime;
       
-      oscillator.type = 'square';
-      oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-      
-      // Pulse effect for 10 seconds
-      for (let i = 0; i < 10; i++) {
-        gainNode.gain.setValueAtTime(1, ctx.currentTime + i);
-        gainNode.gain.setValueAtTime(0, ctx.currentTime + i + 0.5);
+      // Play 3 gentle bell-like chords over 7.5 seconds
+      for (let i = 0; i < 3; i++) {
+        const startTime = now + i * 2.5;
+        
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        
+        // Use sine waves for a soft, pure tone
+        osc1.type = 'sine';
+        osc2.type = 'sine';
+        
+        // C5 and E5 for a pleasant major third interval
+        osc1.frequency.setValueAtTime(523.25, startTime);
+        osc2.frequency.setValueAtTime(659.25, startTime);
+        
+        // Envelope: Soft attack, long exponential decay (like a bell)
+        gainNode.gain.setValueAtTime(0, startTime);
+        gainNode.gain.linearRampToValueAtTime(0.3, startTime + 0.1);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 2.0);
+        
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        osc1.start(startTime);
+        osc2.start(startTime);
+        osc1.stop(startTime + 2.5);
+        osc2.stop(startTime + 2.5);
       }
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(ctx.destination);
-      
-      oscillator.start();
-      oscillator.stop(ctx.currentTime + 10);
     } catch (e) {
-      console.error("Beep failed", e);
+      console.error("Chime failed", e);
     }
   };
 
@@ -467,8 +482,8 @@ export default function App() {
           setTargetEndTime(null);
           workerRef.current?.postMessage({ command: 'stop' });
           
-          // Play alarm beep
-          playBeep();
+          // Play soothing chime
+          playSoothingChime();
 
           // Show Push Notification
           if ('Notification' in window && Notification.permission === 'granted') {
