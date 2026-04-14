@@ -23,8 +23,9 @@ const FlipUnit = ({ digit }: { digit: string }) => {
 };
 
 export const FlipClock = ({ time }: { time: number }) => {
-  const m = Math.floor(time / 60);
-  const s = time % 60;
+  const safeTime = Math.max(0, time);
+  const m = Math.floor(safeTime / 60);
+  const s = safeTime % 60;
   
   const mStr = m.toString().padStart(2, '0');
   const sStr = s.toString().padStart(2, '0');
@@ -32,13 +33,15 @@ export const FlipClock = ({ time }: { time: number }) => {
   return (
     <div className="flex items-center gap-2 sm:gap-4 font-mono mb-8">
       <div className="flex gap-1 sm:gap-2">
-        <FlipUnit digit={mStr[0]} />
-        <FlipUnit digit={mStr[1]} />
+        {mStr.split('').map((digit, i) => (
+          <FlipUnit key={`m-${i}`} digit={digit} />
+        ))}
       </div>
       <div className="text-4xl sm:text-6xl text-[#6750a4] dark:text-purple-400 font-bold mb-2 animate-pulse">:</div>
       <div className="flex gap-1 sm:gap-2">
-        <FlipUnit digit={sStr[0]} />
-        <FlipUnit digit={sStr[1]} />
+        {sStr.split('').map((digit, i) => (
+          <FlipUnit key={`s-${i}`} digit={digit} />
+        ))}
       </div>
     </div>
   );

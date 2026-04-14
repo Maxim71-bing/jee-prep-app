@@ -155,6 +155,8 @@ export default function App() {
   const [workDuration, setWorkDuration] = useState(25);
   const [breakDuration, setBreakDuration] = useState(5);
   const [isTimerSettingsOpen, setIsTimerSettingsOpen] = useState(false);
+  const [tempWorkDuration, setTempWorkDuration] = useState('25');
+  const [tempBreakDuration, setTempBreakDuration] = useState('5');
   const [isFullscreenTimer, setIsFullscreenTimer] = useState(false);
   
   // Mock Test Form State
@@ -380,6 +382,11 @@ export default function App() {
     setActivityLog({});
     setSavedSessions([]);
     setIsTimerRunning(false);
+    setTargetEndTime(null);
+    setIsFullscreenTimer(false);
+    if (workerRef.current) {
+      workerRef.current.postMessage({ command: 'stop' });
+    }
   }, []);
 
   // --- Dates ---
@@ -2001,7 +2008,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Session Logging Modal */}
+      {/* Timer Settings Modal */}
       {isTimerSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-sm shadow-xl border border-[#cac4d0] dark:border-gray-700 animate-in fade-in zoom-in duration-200">
@@ -2017,8 +2024,8 @@ export default function App() {
                   type="number" 
                   min="1"
                   max="120"
-                  value={workDuration}
-                  onChange={(e) => setWorkDuration(Math.max(1, parseInt(e.target.value) || 25))}
+                  value={tempWorkDuration}
+                  onChange={(e) => setTempWorkDuration(e.target.value)}
                   className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] dark:focus:ring-purple-500"
                 />
               </div>
@@ -2029,8 +2036,8 @@ export default function App() {
                   type="number" 
                   min="1"
                   max="60"
-                  value={breakDuration}
-                  onChange={(e) => setBreakDuration(Math.max(1, parseInt(e.target.value) || 5))}
+                  value={tempBreakDuration}
+                  onChange={(e) => setTempBreakDuration(e.target.value)}
                   className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] dark:focus:ring-purple-500"
                 />
               </div>
@@ -2038,9 +2045,26 @@ export default function App() {
             
             <div className="flex justify-end gap-3 mt-8">
               <button 
+                onClick={() => setIsTimerSettingsOpen(false)}
+                className="px-6 py-2.5 rounded-full text-sm font-medium text-[#49454f] dark:text-gray-300 hover:bg-[#ece6f0] dark:hover:bg-gray-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
                 onClick={() => {
+                  const newWork = Math.max(1, parseInt(tempWorkDuration) || 25);
+                  const newBreak = Math.max(1, parseInt(tempBreakDuration) || 5);
+                  setWorkDuration(newWork);
+                  setBreakDuration(newBreak);
+                  setTempWorkDuration(newWork.toString());
+                  setTempBreakDuration(newBreak.toString());
                   setIsTimerSettingsOpen(false);
-                  resetTimer();
+                  
+                  // Reset timer with new values
+                  setIsTimerRunning(false);
+                  setTargetEndTime(null);
+                  if (workerRef.current) workerRef.current.postMessage({ command: 'stop' });
+                  setTimerTime(timerMode === 'work' ? newWork * 60 : newBreak * 60);
                 }}
                 className="px-6 py-2.5 rounded-full text-sm font-medium bg-[#6750a4] hover:bg-[#4f378b] text-white transition-colors"
               >
