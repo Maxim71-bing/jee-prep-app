@@ -23,7 +23,8 @@ import {
   BarChart,
   Activity,
   AlertCircle,
-  Zap
+  Zap,
+  Trash2
 } from 'lucide-react';
 
 // --- Types ---
@@ -61,6 +62,7 @@ interface SavedSession {
   mode: 'work' | 'break';
   progressNotes: string;
   distractionNotes: string;
+  productivity?: 'red' | 'yellow' | 'green';
 }
 
 // --- Initial Data (Based on JEE Syllabus PDF) ---
@@ -124,6 +126,8 @@ export default function App() {
   const [targetEndTime, setTargetEndTime] = useState<number | null>(null);
   const [progressNotes, setProgressNotes] = useState('');
   const [distractionNotes, setDistractionNotes] = useState('');
+  const [isLoggingSession, setIsLoggingSession] = useState(false);
+  const [sessionProductivity, setSessionProductivity] = useState<'red' | 'yellow' | 'green'>('green');
   
   // Mock Test Form State
   const [mtPhysics, setMtPhysics] = useState('');
@@ -484,6 +488,9 @@ export default function App() {
           
           // Play soothing chime
           playSoothingChime();
+          
+          // Open logging modal
+          setIsLoggingSession(true);
 
           // Show Push Notification
           if ('Notification' in window && Notification.permission === 'granted') {
@@ -584,7 +591,10 @@ export default function App() {
 
   const saveSession = useCallback(() => {
     const duration = timerMode === 'work' ? 25 * 60 - timerTime : 5 * 60 - timerTime;
-    if (duration <= 0) return; // Don't save empty sessions
+    if (duration <= 0) {
+      setIsLoggingSession(false);
+      return; // Don't save empty sessions
+    }
 
     const newSession: SavedSession = {
       id: Date.now().toString(),
@@ -592,14 +602,17 @@ export default function App() {
       duration,
       mode: timerMode,
       progressNotes,
-      distractionNotes
+      distractionNotes,
+      productivity: sessionProductivity
     };
 
     setSavedSessions(prev => [newSession, ...prev]);
     setProgressNotes('');
     setDistractionNotes('');
+    setSessionProductivity('green');
+    setIsLoggingSession(false);
     resetTimer();
-  }, [timerMode, timerTime, progressNotes, distractionNotes]);
+  }, [timerMode, timerTime, progressNotes, distractionNotes, sessionProductivity]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -859,38 +872,42 @@ export default function App() {
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Navigation Tabs */}
-        <div className="flex flex-row gap-2 overflow-x-auto pb-4 mb-4 hide-scrollbar w-full">
+        {/* Desktop Navigation Tabs */}
+        <div className="hidden md:flex flex-row gap-2 overflow-x-auto pb-4 mb-4 hide-scrollbar w-full">
           <button
             onClick={() => setActiveTab('plan')}
-            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
-              activeTab === 'plan' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+              activeTab === 'plan' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/80 dark:text-purple-200' : 'bg-transparent border border-[#79747e] text-[#49454f] dark:text-gray-300 dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
             }`}
           >
-            Daily Plan & Progress
+            <Calendar className="w-4 h-4" />
+            Daily Plan
           </button>
           <button
             onClick={() => setActiveTab('syllabus')}
-            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
-              activeTab === 'syllabus' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+              activeTab === 'syllabus' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/80 dark:text-purple-200' : 'bg-transparent border border-[#79747e] text-[#49454f] dark:text-gray-300 dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
             }`}
           >
-            Syllabus Tracker
+            <BookOpen className="w-4 h-4" />
+            Syllabus
           </button>
           <button
             onClick={() => setActiveTab('tests')}
-            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
-              activeTab === 'tests' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+              activeTab === 'tests' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/80 dark:text-purple-200' : 'bg-transparent border border-[#79747e] text-[#49454f] dark:text-gray-300 dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
             }`}
           >
+            <Activity className="w-4 h-4" />
             Mock Tests
           </button>
           <button
             onClick={() => setActiveTab('path')}
-            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
-              activeTab === 'path' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+              activeTab === 'path' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/80 dark:text-purple-200' : 'bg-transparent border border-[#79747e] text-[#49454f] dark:text-gray-300 dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
             }`}
           >
+            <TrendingUp className="w-4 h-4" />
             Path Travelled
           </button>
         </div>
@@ -1146,42 +1163,19 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="w-full md:w-1/2 flex flex-col gap-4">
-                  <div className="bg-[#ece6f0] dark:bg-gray-700 rounded-[24px] p-5 transition-colors duration-300">
-                    <h3 className="text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Progress Notes</h3>
-                    <textarea 
-                      value={progressNotes}
-                      onChange={(e) => setProgressNotes(e.target.value)}
-                      placeholder="What did you accomplish?"
-                      className="w-full h-16 bg-transparent border-none resize-none focus:ring-0 text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none mb-4"
-                    />
-                    <h3 className="text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Distractions</h3>
-                    <textarea 
-                      value={distractionNotes}
-                      onChange={(e) => setDistractionNotes(e.target.value)}
-                      placeholder="Any distracting thoughts?"
-                      className="w-full h-16 bg-transparent border-none resize-none focus:ring-0 text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none"
-                    />
-                  </div>
-                  
-                  <button 
-                    onClick={saveSession}
-                    className="w-full bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium py-3 rounded-full transition-colors flex items-center justify-center gap-2"
-                  >
-                    <CheckCircle2 className="w-5 h-5" />
-                    Save Session
-                  </button>
-
-                  {timerMode === 'break' && (
-                    <div className="bg-[#d3e3fd] dark:bg-blue-900/30 rounded-[24px] p-5 transition-colors duration-300">
-                      <h3 className="text-sm font-medium text-[#001d35] dark:text-blue-300 mb-2 uppercase tracking-wider flex items-center gap-2">
-                        <Zap className="w-4 h-4" /> Flashcard
-                      </h3>
-                      <p className="text-[#1c1b1f] dark:text-gray-100 font-medium text-center py-4">
-                        ∫ e^x [f(x) + f'(x)] dx = e^x f(x) + C
-                      </p>
-                    </div>
+                <div className="w-full md:w-1/2 flex flex-col items-center justify-center gap-4">
+                  {(timerMode === 'work' ? 25 * 60 - timerTime : 5 * 60 - timerTime) > 0 && (
+                    <button 
+                      onClick={() => setIsLoggingSession(true)}
+                      className="w-full max-w-xs bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium py-3 rounded-full transition-colors flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle2 className="w-5 h-5" />
+                      Log Session
+                    </button>
                   )}
+                  <p className="text-sm text-[#49454f] dark:text-gray-400 text-center mt-4">
+                    Focus sessions are automatically saved when the timer completes, or you can log them manually.
+                  </p>
                 </div>
               </div>
             </section>
@@ -1706,14 +1700,31 @@ export default function App() {
                             {session.mode === 'work' ? <Target className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
                           </div>
                           <div>
-                            <p className="font-medium text-[#1c1b1f] dark:text-gray-100 capitalize">{session.mode} Session</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-[#1c1b1f] dark:text-gray-100 capitalize">{session.mode} Session</p>
+                              {session.productivity && (
+                                <div className={`w-3 h-3 rounded-full ${
+                                  session.productivity === 'green' ? 'bg-green-500' :
+                                  session.productivity === 'yellow' ? 'bg-yellow-500' : 'bg-red-500'
+                                }`} title={`Productivity: ${session.productivity}`} />
+                              )}
+                            </div>
                             <p className="text-xs text-[#49454f] dark:text-gray-400">
                               {new Date(session.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </p>
                           </div>
                         </div>
-                        <div className="text-sm font-medium text-[#6750a4] dark:text-purple-400 bg-[#ece6f0] dark:bg-gray-800 px-3 py-1 rounded-full self-start sm:self-auto">
-                          {Math.round(session.duration / 60)} min
+                        <div className="flex items-center gap-2 self-start sm:self-auto">
+                          <div className="text-sm font-medium text-[#6750a4] dark:text-purple-400 bg-[#ece6f0] dark:bg-gray-800 px-3 py-1 rounded-full">
+                            {Math.round(session.duration / 60)} min
+                          </div>
+                          <button
+                            onClick={() => setSavedSessions(prev => prev.filter(s => s.id !== session.id))}
+                            className="p-1.5 text-[#ba1a1a] dark:text-red-400 hover:bg-[#ffdad6] dark:hover:bg-red-900/50 rounded-full transition-colors"
+                            title="Delete Session"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
                       
@@ -1746,6 +1757,139 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#fdfcff] dark:bg-gray-900 border-t border-[#cac4d0] dark:border-gray-700 flex justify-around items-center pb-[env(safe-area-inset-bottom)] pt-2 px-2 z-40 transition-colors duration-300">
+        <button
+          onClick={() => setActiveTab('plan')}
+          className={`flex flex-col items-center p-2 min-w-[64px] rounded-xl transition-colors ${
+            activeTab === 'plan' ? 'text-[#21005d] dark:text-purple-300' : 'text-[#49454f] dark:text-gray-400 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+          }`}
+        >
+          <div className={`px-4 py-1 rounded-full mb-1 transition-colors ${activeTab === 'plan' ? 'bg-[#eaddff] dark:bg-purple-900/80' : 'bg-transparent'}`}>
+            <Calendar className="w-6 h-6" />
+          </div>
+          <span className="text-[10px] font-medium">Plan</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('syllabus')}
+          className={`flex flex-col items-center p-2 min-w-[64px] rounded-xl transition-colors ${
+            activeTab === 'syllabus' ? 'text-[#21005d] dark:text-purple-300' : 'text-[#49454f] dark:text-gray-400 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+          }`}
+        >
+          <div className={`px-4 py-1 rounded-full mb-1 transition-colors ${activeTab === 'syllabus' ? 'bg-[#eaddff] dark:bg-purple-900/80' : 'bg-transparent'}`}>
+            <BookOpen className="w-6 h-6" />
+          </div>
+          <span className="text-[10px] font-medium">Syllabus</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('tests')}
+          className={`flex flex-col items-center p-2 min-w-[64px] rounded-xl transition-colors ${
+            activeTab === 'tests' ? 'text-[#21005d] dark:text-purple-300' : 'text-[#49454f] dark:text-gray-400 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+          }`}
+        >
+          <div className={`px-4 py-1 rounded-full mb-1 transition-colors ${activeTab === 'tests' ? 'bg-[#eaddff] dark:bg-purple-900/80' : 'bg-transparent'}`}>
+            <Activity className="w-6 h-6" />
+          </div>
+          <span className="text-[10px] font-medium">Tests</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('path')}
+          className={`flex flex-col items-center p-2 min-w-[64px] rounded-xl transition-colors ${
+            activeTab === 'path' ? 'text-[#21005d] dark:text-purple-300' : 'text-[#49454f] dark:text-gray-400 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+          }`}
+        >
+          <div className={`px-4 py-1 rounded-full mb-1 transition-colors ${activeTab === 'path' ? 'bg-[#eaddff] dark:bg-purple-900/80' : 'bg-transparent'}`}>
+            <TrendingUp className="w-6 h-6" />
+          </div>
+          <span className="text-[10px] font-medium">Path</span>
+        </button>
+      </div>
+
+      {/* Session Logging Modal */}
+      {isLoggingSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-md shadow-xl border border-[#cac4d0] dark:border-gray-700 animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-medium mb-6 text-[#1c1b1f] dark:text-gray-100 flex items-center gap-2">
+              <CheckCircle2 className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+              Log Session
+            </h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Productivity Rating</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSessionProductivity('green')}
+                    className={`flex-1 py-3 rounded-xl font-medium transition-colors border-2 ${
+                      sessionProductivity === 'green' 
+                        ? 'bg-green-100 dark:bg-green-900/30 border-green-500 text-green-700 dark:text-green-300' 
+                        : 'border-transparent bg-[#ece6f0] dark:bg-gray-800 text-[#49454f] dark:text-gray-400 hover:bg-green-50 dark:hover:bg-green-900/10'
+                    }`}
+                  >
+                    Great
+                  </button>
+                  <button
+                    onClick={() => setSessionProductivity('yellow')}
+                    className={`flex-1 py-3 rounded-xl font-medium transition-colors border-2 ${
+                      sessionProductivity === 'yellow' 
+                        ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-500 text-yellow-700 dark:text-yellow-300' 
+                        : 'border-transparent bg-[#ece6f0] dark:bg-gray-800 text-[#49454f] dark:text-gray-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/10'
+                    }`}
+                  >
+                    Okay
+                  </button>
+                  <button
+                    onClick={() => setSessionProductivity('red')}
+                    className={`flex-1 py-3 rounded-xl font-medium transition-colors border-2 ${
+                      sessionProductivity === 'red' 
+                        ? 'bg-red-100 dark:bg-red-900/30 border-red-500 text-red-700 dark:text-red-300' 
+                        : 'border-transparent bg-[#ece6f0] dark:bg-gray-800 text-[#49454f] dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-900/10'
+                    }`}
+                  >
+                    Poor
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Progress Notes</label>
+                <textarea 
+                  value={progressNotes}
+                  onChange={(e) => setProgressNotes(e.target.value)}
+                  placeholder="What did you accomplish?"
+                  className="w-full h-24 bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] p-4 resize-none focus:ring-2 focus:ring-[#6750a4] text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none transition-shadow"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Distractions</label>
+                <textarea 
+                  value={distractionNotes}
+                  onChange={(e) => setDistractionNotes(e.target.value)}
+                  placeholder="Any distracting thoughts or interruptions?"
+                  className="w-full h-20 bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] p-4 resize-none focus:ring-2 focus:ring-[#6750a4] text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none transition-shadow"
+                />
+              </div>
+            </div>
+
+            <div className="mt-8 flex gap-3">
+              <button 
+                onClick={() => setIsLoggingSession(false)}
+                className="flex-1 py-3 rounded-full font-medium text-[#49454f] dark:text-gray-300 bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#e8def8] dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={saveSession}
+                className="flex-1 py-3 rounded-full font-medium text-white bg-[#6750a4] hover:bg-[#4f378b] transition-colors"
+              >
+                Save Session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
