@@ -142,20 +142,50 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
 
   useEffect(() => {
-    audioRef.current = new Audio('https://actions.google.com/sounds/v1/animals/birds_in_forest.ogg');
-    audioRef.current.loop = true;
-
     workerRef.current = new Worker(new URL('./timerWorker.ts', import.meta.url), { type: 'module' });
 
     return () => {
       workerRef.current?.terminate();
     };
   }, []);
+
+  const playBeep = () => {
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return;
+        audioCtxRef.current = new AudioContextClass();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+      
+      // Pulse effect for 10 seconds
+      for (let i = 0; i < 10; i++) {
+        gainNode.gain.setValueAtTime(1, ctx.currentTime + i);
+        gainNode.gain.setValueAtTime(0, ctx.currentTime + i + 0.5);
+      }
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      oscillator.start();
+      oscillator.stop(ctx.currentTime + 10);
+    } catch (e) {
+      console.error("Beep failed", e);
+    }
+  };
 
   // --- Persistence Effects ---
   
@@ -437,19 +467,8 @@ export default function App() {
           setTargetEndTime(null);
           workerRef.current?.postMessage({ command: 'stop' });
           
-          // Play alarm sound by unmuting the already-playing background track
-          if (audioRef.current) {
-            audioRef.current.volume = 1;
-            audioRef.current.currentTime = 0;
-            
-            // Stop after 10 seconds
-            setTimeout(() => {
-              if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current.currentTime = 0;
-              }
-            }, 10000);
-          }
+          // Play alarm beep
+          playBeep();
 
           // Show Push Notification
           if ('Notification' in window && Notification.permission === 'granted') {
@@ -513,44 +532,37 @@ export default function App() {
         Notification.requestPermission();
       }
 
-      // Unlock Audio and start silent audio
-      if (audioRef.current) {
-        if (!audioUnlocked) {
-          audioRef.current.volume = 0;
-          audioRef.current.play().then(() => {
-            audioRef.current?.pause();
-            if (audioRef.current) {
-              audioRef.current.volume = 1;
-              audioRef.current.currentTime = 0;
-            }
-            setAudioUnlocked(true);
-          }).catch(e => console.log('Audio unlock failed:', e));
+      // Initialize AudioContext on user interaction
+      if (!audioCtxRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtxRef.current = new AudioContextClass();
         }
-        
-        // Always play audio at volume 0 when timer starts to keep background alive
-        audioRef.current.volume = 0;
-        audioRef.current.play().catch(e => console.log('Audio play failed:', e));
+      }
+      if (audioCtxRef.current?.state === 'suspended') {
+        audioCtxRef.current.resume();
       }
       
       // Start Timer
       setTargetEndTime(Date.now() + timerTime * 1000);
+      workerRef.current?.postMessage({ command: 'start' });
     } else {
       // Pause Timer
       setTargetEndTime(null);
-      audioRef.current?.pause();
+      workerRef.current?.postMessage({ command: 'stop' });
     }
     setIsTimerRunning(!isTimerRunning);
   };
   const resetTimer = () => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
-    audioRef.current?.pause();
+    workerRef.current?.postMessage({ command: 'stop' });
     setTimerTime(timerMode === 'work' ? 25 * 60 : 5 * 60);
   };
   const switchTimerMode = (mode: 'work' | 'break') => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
-    audioRef.current?.pause();
+    workerRef.current?.postMessage({ command: 'stop' });
     setTimerMode(mode);
     setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
   };

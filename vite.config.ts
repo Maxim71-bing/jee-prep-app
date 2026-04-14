@@ -11,11 +11,15 @@ export default defineConfig(({mode}) => {
       react(), 
       tailwindcss(),
       VitePWA({
+        strategies: 'injectManifest',
+        srcDir: 'src',
+        filename: 'sw.ts',
         registerType: 'autoUpdate',
         injectRegister: 'auto',
         includeAssets: ['icon.svg'],
         devOptions: {
-          enabled: true
+          enabled: true,
+          type: 'module'
         },
         manifest: {
           name: 'JEE Prep App Builder',
