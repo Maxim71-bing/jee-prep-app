@@ -147,7 +147,7 @@ export default function App() {
   const [targetEndTime, setTargetEndTime] = useState<number | null>(null);
   const [progressNotes, setProgressNotes] = useState('');
   const [distractionNotes, setDistractionNotes] = useState('');
-  const [isLoggingSession, setIsLoggingSession] = useState(false);
+  const [pendingSessionLog, setPendingSessionLog] = useState<{mode: 'work'|'break', duration: number} | null>(null);
   const [sessionProductivity, setSessionProductivity] = useState<'red' | 'yellow' | 'green'>('green');
   const [chapterToRate, setChapterToRate] = useState<string | null>(null);
   
@@ -582,7 +582,10 @@ export default function App() {
           playSoothingChime();
           
           // Open logging modal
-          setIsLoggingSession(true);
+          setPendingSessionLog({
+            mode: timerMode,
+            duration: timerMode === 'work' ? workDuration * 60 : breakDuration * 60
+          });
 
           // Show Push Notification
           if ('Notification' in window && Notification.permission === 'granted') {
@@ -683,17 +686,16 @@ export default function App() {
   };
 
   const saveSession = useCallback(() => {
-    const duration = timerMode === 'work' ? workDuration * 60 - timerTime : breakDuration * 60 - timerTime;
-    if (duration <= 0) {
-      setIsLoggingSession(false);
+    if (!pendingSessionLog || pendingSessionLog.duration <= 0) {
+      setPendingSessionLog(null);
       return; // Don't save empty sessions
     }
 
     const newSession: SavedSession = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
-      duration,
-      mode: timerMode,
+      duration: pendingSessionLog.duration,
+      mode: pendingSessionLog.mode,
       progressNotes,
       distractionNotes,
       productivity: sessionProductivity
@@ -703,9 +705,8 @@ export default function App() {
     setProgressNotes('');
     setDistractionNotes('');
     setSessionProductivity('green');
-    setIsLoggingSession(false);
-    resetTimer();
-  }, [timerMode, timerTime, progressNotes, distractionNotes, sessionProductivity]);
+    setPendingSessionLog(null);
+  }, [pendingSessionLog, progressNotes, distractionNotes, sessionProductivity]);
 
   // 5. Backlog Manager
   const backlogChapters = useMemo(() => {
@@ -1273,7 +1274,13 @@ export default function App() {
                 <div className="w-full md:w-1/2 flex flex-col items-center justify-center gap-4">
                   {(timerMode === 'work' ? workDuration * 60 - timerTime : breakDuration * 60 - timerTime) > 0 && (
                     <button 
-                      onClick={() => setIsLoggingSession(true)}
+                      onClick={() => {
+                        setPendingSessionLog({
+                          mode: timerMode,
+                          duration: timerMode === 'work' ? workDuration * 60 - timerTime : breakDuration * 60 - timerTime
+                        });
+                        resetTimer();
+                      }}
                       className="w-full max-w-xs bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium py-3 rounded-full transition-colors flex items-center justify-center gap-2"
                     >
                       <CheckCircle2 className="w-5 h-5" />
@@ -2075,7 +2082,7 @@ export default function App() {
         </div>
       )}
 
-      {isLoggingSession && (
+      {pendingSessionLog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-md shadow-xl border border-[#cac4d0] dark:border-gray-700 animate-in fade-in zoom-in duration-200">
             <h2 className="text-xl font-medium mb-6 text-[#1c1b1f] dark:text-gray-100 flex items-center gap-2">
@@ -2143,7 +2150,7 @@ export default function App() {
 
             <div className="mt-8 flex gap-3">
               <button 
-                onClick={() => setIsLoggingSession(false)}
+                onClick={() => setPendingSessionLog(null)}
                 className="flex-1 py-3 rounded-full font-medium text-[#49454f] dark:text-gray-300 bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#e8def8] dark:hover:bg-gray-700 transition-colors"
               >
                 Cancel
