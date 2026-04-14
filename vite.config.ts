@@ -28,7 +28,7 @@ export default defineConfig(({mode}) => {
           theme_color: '#ffffff',
           background_color: '#ffffff',
           display: 'standalone',
-          orientation: 'portrait',
+          orientation: 'any',
           id: '/?source=pwa',
           start_url: '/',
           icons: [
