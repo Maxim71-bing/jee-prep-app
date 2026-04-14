@@ -54,6 +54,15 @@ interface Chapter {
   lastRevised?: string;
 }
 
+interface SavedSession {
+  id: string;
+  date: string;
+  duration: number; // in seconds
+  mode: 'work' | 'break';
+  progressNotes: string;
+  distractionNotes: string;
+}
+
 // --- Initial Data (Based on JEE Syllabus PDF) ---
 const INITIAL_CHAPTERS: Chapter[] = [
   // Physics
@@ -97,7 +106,7 @@ export default function App() {
 
   // --- App State ---
   const [chapters, setChapters] = useState<Chapter[]>(INITIAL_CHAPTERS);
-  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests' | 'path'>('plan');
   const [dailyPlan, setDailyPlan] = useState<{date: string, chapterIds: string[]}>({ date: '', chapterIds: [] });
   const [streak, setStreak] = useState<{count: number, lastActivityDate: string}>({ count: 0, lastActivityDate: '' });
   const [mockTests, setMockTests] = useState<MockTest[]>([]);
@@ -105,6 +114,7 @@ export default function App() {
   const [dailyBig3, setDailyBig3] = useState<{date: string, tasks: {id: string, text: string, completed: boolean}[]}>({ date: '', tasks: [] });
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [goalScore, setGoalScore] = useState<number>(200);
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
   // Pomodoro State
@@ -112,7 +122,8 @@ export default function App() {
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timerMode, setTimerMode] = useState<'work' | 'break'>('work');
   const [targetEndTime, setTargetEndTime] = useState<number | null>(null);
-  const [sessionNotes, setSessionNotes] = useState('');
+  const [progressNotes, setProgressNotes] = useState('');
+  const [distractionNotes, setDistractionNotes] = useState('');
   
   // Mock Test Form State
   const [mtPhysics, setMtPhysics] = useState('');
@@ -160,9 +171,9 @@ export default function App() {
   // 2. Save user data whenever chapters change
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore }));
+      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions }));
     }
-  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, currentUser]);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, currentUser]);
 
   const loadUserData = (user: string) => {
     setIsLoading(true);
@@ -178,6 +189,7 @@ export default function App() {
           setActivityLog({});
           setDailyBig3({ date: '', tasks: [] });
           setGoalScore(200);
+          setSavedSessions([]);
         } else {
           setChapters(parsed.chapters || INITIAL_CHAPTERS);
           setDailyPlan(parsed.dailyPlan || { date: '', chapterIds: [] });
@@ -186,6 +198,7 @@ export default function App() {
           setActivityLog(parsed.activityLog || {});
           setDailyBig3(parsed.dailyBig3 || { date: '', tasks: [] });
           setGoalScore(parsed.goalScore || 200);
+          setSavedSessions(parsed.savedSessions || []);
         }
       } catch (e) {
         setChapters(INITIAL_CHAPTERS);
@@ -198,6 +211,7 @@ export default function App() {
       setActivityLog({});
       setDailyBig3({ date: '', tasks: [] });
       setGoalScore(200);
+      setSavedSessions([]);
     }
     
     // Simulate brief loading for skeleton screens
@@ -253,6 +267,7 @@ export default function App() {
     setStreak({ count: 0, lastActivityDate: '' });
     setMockTests([]);
     setActivityLog({});
+    setSavedSessions([]);
     setIsTimerRunning(false);
   }, []);
 
@@ -540,6 +555,25 @@ export default function App() {
     setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
   };
 
+  const saveSession = useCallback(() => {
+    const duration = timerMode === 'work' ? 25 * 60 - timerTime : 5 * 60 - timerTime;
+    if (duration <= 0) return; // Don't save empty sessions
+
+    const newSession: SavedSession = {
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
+      duration,
+      mode: timerMode,
+      progressNotes,
+      distractionNotes
+    };
+
+    setSavedSessions(prev => [newSession, ...prev]);
+    setProgressNotes('');
+    setDistractionNotes('');
+    resetTimer();
+  }, [timerMode, timerTime, progressNotes, distractionNotes]);
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -824,6 +858,14 @@ export default function App() {
           >
             Mock Tests
           </button>
+          <button
+            onClick={() => setActiveTab('path')}
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors ${
+              activeTab === 'path' ? 'bg-[#eaddff] text-[#21005d]' : 'bg-transparent border border-[#79747e] text-[#49454f] hover:bg-[#ece6f0]'
+            }`}
+          >
+            Path Travelled
+          </button>
         </div>
 
         {activeTab === 'plan' && (
@@ -1079,14 +1121,30 @@ export default function App() {
 
                 <div className="w-full md:w-1/2 flex flex-col gap-4">
                   <div className="bg-[#ece6f0] dark:bg-gray-700 rounded-[24px] p-5 transition-colors duration-300">
-                    <h3 className="text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Session Notes</h3>
+                    <h3 className="text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Progress Notes</h3>
                     <textarea 
-                      value={sessionNotes}
-                      onChange={(e) => setSessionNotes(e.target.value)}
-                      placeholder="Jot down distracting thoughts or key takeaways here..."
-                      className="w-full h-32 bg-transparent border-none resize-none focus:ring-0 text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none"
+                      value={progressNotes}
+                      onChange={(e) => setProgressNotes(e.target.value)}
+                      placeholder="What did you accomplish?"
+                      className="w-full h-16 bg-transparent border-none resize-none focus:ring-0 text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none mb-4"
+                    />
+                    <h3 className="text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2 uppercase tracking-wider">Distractions</h3>
+                    <textarea 
+                      value={distractionNotes}
+                      onChange={(e) => setDistractionNotes(e.target.value)}
+                      placeholder="Any distracting thoughts?"
+                      className="w-full h-16 bg-transparent border-none resize-none focus:ring-0 text-[#1c1b1f] dark:text-gray-100 placeholder-[#79747e] dark:placeholder-gray-500 outline-none"
                     />
                   </div>
+                  
+                  <button 
+                    onClick={saveSession}
+                    className="w-full bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium py-3 rounded-full transition-colors flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                    Save Session
+                  </button>
+
                   {timerMode === 'break' && (
                     <div className="bg-[#d3e3fd] dark:bg-blue-900/30 rounded-[24px] p-5 transition-colors duration-300">
                       <h3 className="text-sm font-medium text-[#001d35] dark:text-blue-300 mb-2 uppercase tracking-wider flex items-center gap-2">
@@ -1597,6 +1655,65 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </section>
+          </div>
+        )}
+
+        {activeTab === 'path' && (
+          <div className="space-y-6">
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f] dark:text-gray-100">
+                <BookOpen className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                Path Travelled (Saved Sessions)
+              </h2>
+              
+              {savedSessions.length > 0 ? (
+                <div className="space-y-4">
+                  {savedSessions.map(session => (
+                    <div key={session.id} className="bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] p-5 shadow-sm border border-[#cac4d0] dark:border-gray-700 transition-colors duration-300">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                            session.mode === 'work' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/50 dark:text-purple-200' : 'bg-[#d3e3fd] text-[#001d35] dark:bg-blue-900/50 dark:text-blue-200'
+                          }`}>
+                            {session.mode === 'work' ? <Target className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+                          </div>
+                          <div>
+                            <p className="font-medium text-[#1c1b1f] dark:text-gray-100 capitalize">{session.mode} Session</p>
+                            <p className="text-xs text-[#49454f] dark:text-gray-400">
+                              {new Date(session.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-sm font-medium text-[#6750a4] dark:text-purple-400 bg-[#ece6f0] dark:bg-gray-800 px-3 py-1 rounded-full self-start sm:self-auto">
+                          {Math.round(session.duration / 60)} min
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {session.progressNotes && (
+                          <div className="bg-[#ece6f0] dark:bg-gray-800 rounded-[16px] p-4">
+                            <h4 className="text-xs font-medium text-[#49454f] dark:text-gray-400 uppercase tracking-wider mb-2">Progress</h4>
+                            <p className="text-sm text-[#1c1b1f] dark:text-gray-100 whitespace-pre-wrap">{session.progressNotes}</p>
+                          </div>
+                        )}
+                        {session.distractionNotes && (
+                          <div className="bg-[#ffdad6] dark:bg-red-900/20 rounded-[16px] p-4">
+                            <h4 className="text-xs font-medium text-[#410002] dark:text-red-300 uppercase tracking-wider mb-2">Distractions</h4>
+                            <p className="text-sm text-[#1c1b1f] dark:text-gray-100 whitespace-pre-wrap">{session.distractionNotes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-[#49454f] dark:text-gray-400">
+                  <BookOpen className="w-12 h-12 mx-auto mb-3 text-[#cac4d0] dark:text-gray-600" />
+                  <p>No saved sessions yet.</p>
+                  <p className="text-sm">Complete a focus or break session and save it to see your history here.</p>
+                </div>
+              )}
             </section>
           </div>
         )}
