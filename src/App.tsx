@@ -24,8 +24,30 @@ import {
   Activity,
   AlertCircle,
   Zap,
-  Trash2
+  Trash2,
+  Settings,
+  Maximize,
+  Minimize
 } from 'lucide-react';
+import { SyllabusHeatmap, HeatmapChapter } from './components/SyllabusHeatmap';
+import { useDecayTimer } from './lib/decay';
+import { FlipClock } from './components/FlipClock';
+
+// --- Components ---
+const DecayTimerDisplay = ({ lastRevisionDate, confidenceScore }: { lastRevisionDate: string, confidenceScore: number }) => {
+  const countdown = useDecayTimer(lastRevisionDate, confidenceScore);
+  const isDecayed = countdown === 'Decayed';
+  
+  return (
+    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+      isDecayed 
+        ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' 
+        : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+    }`}>
+      {countdown}
+    </span>
+  );
+};
 
 // --- Types ---
 interface MockTest {
@@ -41,7 +63,6 @@ interface MockTest {
   notes?: string;
 }
 type Subject = 'Physics' | 'Chemistry' | 'Mathematics';
-type Confidence = 'Low' | 'Medium' | 'High';
 
 interface Chapter {
   id: string;
@@ -50,7 +71,7 @@ interface Chapter {
   weightage: number; // 1 to 10 scale based on historical JEE importance
   difficulty: number; // 1 to 5 scale
   completed: boolean;
-  confidence?: Confidence;
+  confidenceScore?: number; // 1 to 5 scale
   revisionCount?: number;
   lastRevised?: string;
 }
@@ -128,6 +149,13 @@ export default function App() {
   const [distractionNotes, setDistractionNotes] = useState('');
   const [isLoggingSession, setIsLoggingSession] = useState(false);
   const [sessionProductivity, setSessionProductivity] = useState<'red' | 'yellow' | 'green'>('green');
+  const [chapterToRate, setChapterToRate] = useState<string | null>(null);
+  
+  // Timer Settings
+  const [workDuration, setWorkDuration] = useState(25);
+  const [breakDuration, setBreakDuration] = useState(5);
+  const [isTimerSettingsOpen, setIsTimerSettingsOpen] = useState(false);
+  const [isFullscreenTimer, setIsFullscreenTimer] = useState(false);
   
   // Mock Test Form State
   const [mtPhysics, setMtPhysics] = useState('');
@@ -156,6 +184,38 @@ export default function App() {
       workerRef.current?.terminate();
     };
   }, []);
+
+  const playTickSound = () => {
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return;
+        audioCtxRef.current = new AudioContextClass();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+      
+      gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + 0.05);
+    } catch (e) {
+      console.error("Error playing tick sound", e);
+    }
+  };
 
   const playSoothingChime = () => {
     try {
@@ -220,9 +280,9 @@ export default function App() {
   // 2. Save user data whenever chapters change
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions }));
+      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration }));
     }
-  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, currentUser]);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, currentUser]);
 
   const loadUserData = (user: string) => {
     setIsLoading(true);
@@ -248,6 +308,8 @@ export default function App() {
           setDailyBig3(parsed.dailyBig3 || { date: '', tasks: [] });
           setGoalScore(parsed.goalScore || 200);
           setSavedSessions(parsed.savedSessions || []);
+          if (parsed.workDuration) setWorkDuration(parsed.workDuration);
+          if (parsed.breakDuration) setBreakDuration(parsed.breakDuration);
         }
       } catch (e) {
         setChapters(INITIAL_CHAPTERS);
@@ -427,6 +489,24 @@ export default function App() {
 
   const currentPlanLoad = todaysPlanChapters.reduce((acc, c) => acc + c.difficulty, 0);
 
+  // Heatmap Data
+  const heatmapChapters: HeatmapChapter[] = useMemo(() => {
+    const now = Date.now();
+    return chapters.map(c => {
+      let daysSinceLastRevision: number | null = null;
+      if (c.lastRevised) {
+        const diffMs = now - new Date(c.lastRevised).getTime();
+        daysSinceLastRevision = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      }
+      return {
+        id: c.id,
+        subject: c.subject,
+        chapterName: c.name,
+        daysSinceLastRevision
+      };
+    });
+  }, [chapters]);
+
   // Overall Progress
   const totalCompleted = chapters.filter(c => c.completed).length;
   const overallProgress = Math.round((totalCompleted / chapters.length) * 100);
@@ -480,10 +560,15 @@ export default function App() {
         const now = Date.now();
         const remaining = Math.max(0, Math.round((targetEndTime - now) / 1000));
         setTimerTime(remaining);
+        
+        if (remaining > 0) {
+          playTickSound();
+        }
 
         if (remaining === 0) {
           setIsTimerRunning(false);
           setTargetEndTime(null);
+          setIsFullscreenTimer(false);
           workerRef.current?.postMessage({ command: 'stop' });
           
           // Play soothing chime
@@ -495,7 +580,7 @@ export default function App() {
           // Show Push Notification
           if ('Notification' in window && Notification.permission === 'granted') {
             const title = timerMode === 'work' ? 'Focus Session Complete!' : 'Break Time Over!';
-            const body = timerMode === 'work' ? 'Time to take a 5-minute break.' : 'Time to get back to focus!';
+            const body = timerMode === 'work' ? `Time to take a ${breakDuration}-minute break.` : 'Time to get back to focus!';
             
             navigator.serviceWorker.ready.then(registration => {
               registration.showNotification(title, {
@@ -512,10 +597,10 @@ export default function App() {
           // Auto-switch mode
           if (timerMode === 'work') {
             setTimerMode('break');
-            setTimerTime(5 * 60);
+            setTimerTime(breakDuration * 60);
           } else {
             setTimerMode('work');
-            setTimerTime(25 * 60);
+            setTimerTime(workDuration * 60);
           }
         }
       }
@@ -568,6 +653,7 @@ export default function App() {
       // Start Timer
       setTargetEndTime(Date.now() + timerTime * 1000);
       workerRef.current?.postMessage({ command: 'start' });
+      setIsFullscreenTimer(true);
     } else {
       // Pause Timer
       setTargetEndTime(null);
@@ -579,18 +665,18 @@ export default function App() {
     setIsTimerRunning(false);
     setTargetEndTime(null);
     workerRef.current?.postMessage({ command: 'stop' });
-    setTimerTime(timerMode === 'work' ? 25 * 60 : 5 * 60);
+    setTimerTime(timerMode === 'work' ? workDuration * 60 : breakDuration * 60);
   };
   const switchTimerMode = (mode: 'work' | 'break') => {
     setIsTimerRunning(false);
     setTargetEndTime(null);
     workerRef.current?.postMessage({ command: 'stop' });
     setTimerMode(mode);
-    setTimerTime(mode === 'work' ? 25 * 60 : 5 * 60);
+    setTimerTime(mode === 'work' ? workDuration * 60 : breakDuration * 60);
   };
 
   const saveSession = useCallback(() => {
-    const duration = timerMode === 'work' ? 25 * 60 - timerTime : 5 * 60 - timerTime;
+    const duration = timerMode === 'work' ? workDuration * 60 - timerTime : breakDuration * 60 - timerTime;
     if (duration <= 0) {
       setIsLoggingSession(false);
       return; // Don't save empty sessions
@@ -614,12 +700,6 @@ export default function App() {
     resetTimer();
   }, [timerMode, timerTime, progressNotes, distractionNotes, sessionProductivity]);
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
   // 5. Backlog Manager
   const backlogChapters = useMemo(() => {
     return chapters
@@ -640,57 +720,61 @@ export default function App() {
 
   // --- Handlers ---
   const toggleChapter = useCallback((id: string) => {
-    setChapters(prev => {
-      const newChapters = prev.map(c => 
-        c.id === id ? { ...c, completed: !c.completed } : c
-      );
-      
-      const chapter = prev.find(c => c.id === id);
-      if (chapter) {
-        if (!chapter.completed) {
-          // Marking as completed
-          setActivityLog(prevLog => ({
-            ...prevLog,
-            [todayStr]: (prevLog[todayStr] || 0) + 1
-          }));
+    const chapter = chapters.find(c => c.id === id);
+    if (!chapter) return;
 
-          setStreak(prevStreak => {
-            if (prevStreak.lastActivityDate === todayStr) {
-              return prevStreak;
-            }
-            
-            const yesterday = new Date(todayDateObj);
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
-            
-            if (prevStreak.lastActivityDate === yesterdayStr) {
-              return { count: prevStreak.count + 1, lastActivityDate: todayStr };
-            } else {
-              return { count: 1, lastActivityDate: todayStr };
-            }
-          });
-        } else {
-          // Unmarking as completed
-          setActivityLog(prevLog => ({
-            ...prevLog,
-            [todayStr]: Math.max(0, (prevLog[todayStr] || 0) - 1)
-          }));
-        }
+    if (!chapter.completed) {
+      // Prompt for confidence score before marking completed
+      setChapterToRate(id);
+    } else {
+      // Unmarking as completed
+      setChapters(prev => prev.map(c => 
+        c.id === id ? { ...c, completed: false, confidenceScore: undefined, lastRevised: undefined } : c
+      ));
+      
+      setActivityLog(prevLog => ({
+        ...prevLog,
+        [todayStr]: Math.max(0, (prevLog[todayStr] || 0) - 1)
+      }));
+    }
+  }, [chapters, todayStr]);
+
+  const handleRateChapter = (score: number) => {
+    if (!chapterToRate) return;
+
+    setChapters(prev => prev.map(c => 
+      c.id === chapterToRate 
+        ? { ...c, completed: true, confidenceScore: score, lastRevised: new Date().toISOString() } 
+        : c
+    ));
+
+    setActivityLog(prevLog => ({
+      ...prevLog,
+      [todayStr]: (prevLog[todayStr] || 0) + 1
+    }));
+
+    setStreak(prevStreak => {
+      if (prevStreak.lastActivityDate === todayStr) {
+        return prevStreak;
       }
       
-      return newChapters;
+      const yesterday = new Date(todayDateObj);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      
+      if (prevStreak.lastActivityDate === yesterdayStr) {
+        return { count: prevStreak.count + 1, lastActivityDate: todayStr };
+      } else {
+        return { count: 1, lastActivityDate: todayStr };
+      }
     });
-  }, [todayStr, todayDateObj]);
+
+    setChapterToRate(null);
+  };
 
   const setChapterDifficulty = useCallback((id: string, difficulty: number) => {
     setChapters(prev => prev.map(c => 
       c.id === id ? { ...c, difficulty } : c
-    ));
-  }, []);
-
-  const setChapterConfidence = useCallback((id: string, confidence: Confidence) => {
-    setChapters(prev => prev.map(c => 
-      c.id === id ? { ...c, confidence } : c
     ));
   }, []);
 
@@ -1127,24 +1211,40 @@ export default function App() {
               </h2>
               
               <div className="flex flex-col md:flex-row gap-8 items-center justify-center">
-                <div className="flex flex-col items-center">
+                <div className="flex flex-col items-center relative">
+                  <button
+                    onClick={() => setIsTimerSettingsOpen(true)}
+                    className="absolute -top-4 -right-4 p-2 text-[#49454f] dark:text-gray-400 hover:bg-[#eaddff] dark:hover:bg-gray-700 rounded-full transition-colors"
+                    title="Timer Settings"
+                  >
+                    <Settings className="w-5 h-5" />
+                  </button>
                   <div className="flex gap-2 mb-8 bg-[#e7e0ec] dark:bg-gray-700 p-1 rounded-full transition-colors duration-300">
                     <button 
                       onClick={() => switchTimerMode('work')}
                       className={`px-6 py-2 rounded-full text-sm font-medium transition-colors ${timerMode === 'work' ? 'bg-[#6750a4] text-white shadow-sm' : 'text-[#49454f] dark:text-gray-300 hover:bg-[#d0bcff] dark:hover:bg-gray-600'}`}
                     >
-                      Focus (25m)
+                      Focus ({workDuration}m)
                     </button>
                     <button 
                       onClick={() => switchTimerMode('break')}
                       className={`px-6 py-2 rounded-full text-sm font-medium transition-colors ${timerMode === 'break' ? 'bg-[#6750a4] text-white shadow-sm' : 'text-[#49454f] dark:text-gray-300 hover:bg-[#d0bcff] dark:hover:bg-gray-600'}`}
                     >
-                      Break (5m)
+                      Break ({breakDuration}m)
                     </button>
                   </div>
                   
-                  <div className="text-7xl sm:text-8xl font-light text-[#1c1b1f] dark:text-gray-100 mb-8 tracking-tight font-mono">
-                    {formatTime(timerTime)}
+                  <div className="relative">
+                    <FlipClock time={timerTime} />
+                    {isTimerRunning && (
+                      <button 
+                        onClick={() => setIsFullscreenTimer(true)}
+                        className="absolute -top-4 -right-12 p-2 text-[#49454f] dark:text-gray-400 hover:bg-[#eaddff] dark:hover:bg-gray-700 rounded-full transition-colors"
+                        title="Fullscreen Timer"
+                      >
+                        <Maximize className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                   
                   <div className="flex gap-4">
@@ -1164,7 +1264,7 @@ export default function App() {
                 </div>
 
                 <div className="w-full md:w-1/2 flex flex-col items-center justify-center gap-4">
-                  {(timerMode === 'work' ? 25 * 60 - timerTime : 5 * 60 - timerTime) > 0 && (
+                  {(timerMode === 'work' ? workDuration * 60 - timerTime : breakDuration * 60 - timerTime) > 0 && (
                     <button 
                       onClick={() => setIsLoggingSession(true)}
                       className="w-full max-w-xs bg-[#6750a4] hover:bg-[#4f378b] text-white font-medium py-3 rounded-full transition-colors flex items-center justify-center gap-2"
@@ -1278,6 +1378,15 @@ export default function App() {
               </div>
             </section>
 
+            <section className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 shadow-sm border border-[#cac4d0] dark:border-gray-700 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-2 text-[#1c1b1f] dark:text-gray-100">
+                <Flame className="w-6 h-6 text-orange-500" />
+                War Room Heatmap
+              </h2>
+              <p className="text-sm text-[#49454f] dark:text-gray-400 mb-4">Track chapter freshness based on your last revision date.</p>
+              <SyllabusHeatmap chapters={heatmapChapters} />
+            </section>
+
             <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] shadow-sm border border-[#cac4d0] dark:border-gray-700 overflow-hidden transition-colors duration-300">
               <div className="p-6 border-b border-[#cac4d0] dark:border-gray-700 bg-[#ece6f0] dark:bg-gray-800 transition-colors duration-300">
                 <h2 className="text-lg font-medium text-[#1c1b1f] dark:text-gray-100">Full Syllabus Tracker</h2>
@@ -1355,16 +1464,22 @@ export default function App() {
                               
                               <div className="flex items-center justify-between sm:justify-end w-full gap-2">
                                 <span className="text-xs font-medium text-[#49454f] dark:text-gray-400">Confidence:</span>
-                                <select 
-                                  value={chapter.confidence || 'Medium'}
-                                  onChange={(e) => setChapterConfidence(chapter.id, e.target.value as Confidence)}
-                                  className="text-xs bg-transparent border border-[#cac4d0] dark:border-gray-600 rounded-md px-2 py-1 text-[#1c1b1f] dark:text-gray-100 focus:outline-none focus:border-[#6750a4] dark:focus:border-purple-400"
-                                >
-                                  <option value="Low">Low</option>
-                                  <option value="Medium">Medium</option>
-                                  <option value="High">High</option>
-                                </select>
+                                {chapter.confidenceScore ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs font-bold text-[#6750a4] dark:text-purple-400">{chapter.confidenceScore}/5</span>
+                                    <Star className="w-3 h-3 text-[#6750a4] dark:text-purple-400 fill-current" />
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-[#49454f] dark:text-gray-500 italic">Not rated</span>
+                                )}
                               </div>
+                              
+                              {chapter.completed && chapter.lastRevised && chapter.confidenceScore && (
+                                <div className="flex items-center justify-between sm:justify-end w-full gap-2 mt-1">
+                                  <span className="text-[10px] font-medium text-[#49454f] dark:text-gray-400 uppercase tracking-wider">Decay in:</span>
+                                  <DecayTimerDisplay lastRevisionDate={chapter.lastRevised} confidenceScore={chapter.confidenceScore} />
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -1806,7 +1921,136 @@ export default function App() {
         </button>
       </div>
 
+      {/* Chapter Confidence Rating Modal */}
+      {chapterToRate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-md shadow-xl border border-[#cac4d0] dark:border-gray-700 animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-medium mb-2 text-[#1c1b1f] dark:text-gray-100 flex items-center gap-2">
+              <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />
+              Rate Your Confidence
+            </h2>
+            <p className="text-sm text-[#49454f] dark:text-gray-400 mb-6">
+              How confident are you in this chapter? This helps calculate when you should revise it next.
+            </p>
+            
+            <div className="flex justify-between gap-2 mb-8">
+              {[1, 2, 3, 4, 5].map((score) => (
+                <button
+                  key={score}
+                  onClick={() => handleRateChapter(score)}
+                  className="flex flex-col items-center gap-2 flex-1 group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-[#ece6f0] dark:bg-gray-800 flex items-center justify-center group-hover:bg-[#eaddff] dark:group-hover:bg-purple-900/50 group-hover:text-[#21005d] dark:group-hover:text-purple-300 transition-colors border border-transparent group-hover:border-[#6750a4] dark:group-hover:border-purple-500">
+                    <span className="text-lg font-bold">{score}</span>
+                  </div>
+                  <span className="text-xs text-[#49454f] dark:text-gray-400 font-medium">
+                    {score === 1 && 'Low'}
+                    {score === 3 && 'Medium'}
+                    {score === 5 && 'High'}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setChapterToRate(null)}
+                className="flex-1 py-3 rounded-full font-medium text-[#49454f] dark:text-gray-300 bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#e8def8] dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Timer Overlay */}
+      {isFullscreenTimer && (
+        <div className="fixed inset-0 z-[100] bg-[#fdfcff] dark:bg-gray-900 flex flex-col items-center justify-center p-4 animate-in fade-in duration-300">
+          <button 
+            onClick={() => setIsFullscreenTimer(false)}
+            className="absolute top-6 right-6 p-3 text-[#49454f] dark:text-gray-400 hover:bg-[#eaddff] dark:hover:bg-gray-800 rounded-full transition-colors"
+            title="Minimize Timer"
+          >
+            <Minimize className="w-6 h-6" />
+          </button>
+          
+          <div className="text-2xl font-medium text-[#6750a4] dark:text-purple-400 mb-12 tracking-widest uppercase">
+            {timerMode === 'work' ? 'Focus Session' : 'Break Time'}
+          </div>
+
+          <FlipClock time={timerTime} />
+
+          <div className="flex gap-6 mt-12">
+            <button 
+              onClick={toggleTimer}
+              className="w-20 h-20 rounded-full bg-[#6750a4] hover:bg-[#4f378b] text-white flex items-center justify-center transition-colors shadow-lg"
+            >
+              {isTimerRunning ? <Pause className="w-10 h-10" /> : <Play className="w-10 h-10 ml-2" />}
+            </button>
+            <button 
+              onClick={() => {
+                resetTimer();
+                setIsFullscreenTimer(false);
+              }}
+              className="w-20 h-20 rounded-full bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#e8def8] dark:hover:bg-gray-700 text-[#49454f] dark:text-gray-300 flex items-center justify-center transition-colors shadow-lg"
+            >
+              <RotateCcw className="w-8 h-8" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Session Logging Modal */}
+      {isTimerSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-sm shadow-xl border border-[#cac4d0] dark:border-gray-700 animate-in fade-in zoom-in duration-200">
+            <h2 className="text-xl font-medium mb-6 text-[#1c1b1f] dark:text-gray-100 flex items-center gap-2">
+              <Settings className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+              Timer Settings
+            </h2>
+            
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Focus Duration (minutes)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  max="120"
+                  value={workDuration}
+                  onChange={(e) => setWorkDuration(Math.max(1, parseInt(e.target.value) || 25))}
+                  className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] dark:focus:ring-purple-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Break Duration (minutes)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  max="60"
+                  value={breakDuration}
+                  onChange={(e) => setBreakDuration(Math.max(1, parseInt(e.target.value) || 5))}
+                  className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] dark:focus:ring-purple-500"
+                />
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 mt-8">
+              <button 
+                onClick={() => {
+                  setIsTimerSettingsOpen(false);
+                  resetTimer();
+                }}
+                className="px-6 py-2.5 rounded-full text-sm font-medium bg-[#6750a4] hover:bg-[#4f378b] text-white transition-colors"
+              >
+                Save & Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isLoggingSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-md shadow-xl border border-[#cac4d0] dark:border-gray-700 animate-in fade-in zoom-in duration-200">
