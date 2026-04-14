@@ -398,7 +398,14 @@ export default function App() {
     setIsGeneratingSchedule(true);
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      // Use process.env for AI Studio, and import.meta.env for Vite/Netlify deployments
+      const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env.VITE_GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        throw new Error("Gemini API Key not found. Please set VITE_GEMINI_API_KEY in your environment.");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       
       let chaptersToSchedule = chapters.filter(c => dailyPlan.chapterIds.includes(c.id));
       let existingTasks: ScheduleTask[] = [];
