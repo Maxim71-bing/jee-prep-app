@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { GoogleGenAI, Type } from "@google/genai";
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, BarChart as RechartsBarChart, Bar, Legend
 } from 'recharts';
 import { 
   Calendar, 
@@ -28,7 +28,20 @@ import {
   Trash2,
   Settings,
   Maximize,
-  Minimize
+  Minimize,
+  Search,
+  Filter,
+  Download,
+  Upload,
+  Plus,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  Lightbulb,
+  Trophy,
+  MapPin,
+  RefreshCw
 } from 'lucide-react';
 import { SyllabusHeatmap, HeatmapChapter } from './components/SyllabusHeatmap';
 import { useDecayTimer } from './lib/decay';
@@ -47,6 +60,217 @@ const DecayTimerDisplay = ({ lastRevisionDate, confidenceScore }: { lastRevision
     }`}>
       {countdown}
     </span>
+  );
+};
+
+interface AddTipFormProps {
+  chapters: Chapter[];
+  onAdd: (chapterId: string, tip: string, category: StudyTip['category']) => void;
+}
+
+const AddTipForm: React.FC<AddTipFormProps> = ({ chapters, onAdd }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [selectedChapter, setSelectedChapter] = useState('');
+  const [tipText, setTipText] = useState('');
+  const [category, setCategory] = useState<StudyTip['category']>('concept');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedChapter || !tipText.trim()) return;
+    onAdd(selectedChapter, tipText, category);
+    setTipText('');
+    setIsOpen(false);
+  };
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full bg-[#6750a4] text-white hover:bg-[#4f378b] transition-colors"
+      >
+        <Plus className="w-4 h-4" />
+        Add Tip
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-md shadow-xl border border-[#cac4d0] dark:border-gray-700">
+        <h2 className="text-xl font-medium mb-6 text-[#1c1b1f] dark:text-gray-100 flex items-center gap-2">
+          <Lightbulb className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+          Add Study Tip
+        </h2>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Chapter</label>
+            <select
+              value={selectedChapter}
+              onChange={(e) => setSelectedChapter(e.target.value)}
+              className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] outline-none"
+              required
+            >
+              <option value="">Select a chapter</option>
+              {chapters.map(chapter => (
+                <option key={chapter.id} value={chapter.id}>{chapter.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Category</label>
+            <div className="flex gap-2">
+              {(['concept', 'formula', 'shortcut', 'mistake'] as const).map(cat => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setCategory(cat)}
+                  className={`flex-1 py-2 text-xs font-medium rounded-full transition-colors ${
+                    category === cat
+                      ? 'bg-[#6750a4] text-white'
+                      : 'bg-[#ece6f0] dark:bg-gray-800 text-[#49454f] dark:text-gray-400 hover:bg-[#eaddff] dark:hover:bg-purple-900/30'
+                  }`}
+                >
+                  {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Tip</label>
+            <textarea
+              value={tipText}
+              onChange={(e) => setTipText(e.target.value)}
+              placeholder="Enter your study tip..."
+              className="w-full h-24 bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] p-4 resize-none focus:ring-2 focus:ring-[#6750a4] text-[#1c1b1f] dark:text-gray-100 outline-none"
+              required
+            />
+          </div>
+          
+          <div className="flex gap-3 mt-6">
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="flex-1 py-3 rounded-full font-medium text-[#49454f] dark:text-gray-300 bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#e8def8] dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-3 rounded-full font-medium text-white bg-[#6750a4] hover:bg-[#4f378b] transition-colors"
+            >
+              Add Tip
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+interface AddFormulaFormProps {
+  chapters: Chapter[];
+  onAdd: (chapterId: string, formula: string, description: string, subject: Subject) => void;
+}
+
+const AddFormulaForm: React.FC<AddFormulaFormProps> = ({ chapters, onAdd }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [selectedChapter, setSelectedChapter] = useState('');
+  const [formulaText, setFormulaText] = useState('');
+  const [description, setDescription] = useState('');
+  const [subject, setSubject] = useState<Subject>('Physics');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedChapter || !formulaText.trim()) return;
+    
+    const chapter = chapters.find(c => c.id === selectedChapter);
+    if (chapter) {
+      onAdd(selectedChapter, formulaText, description, chapter.subject);
+    }
+    setFormulaText('');
+    setDescription('');
+    setIsOpen(false);
+  };
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full bg-[#6750a4] text-white hover:bg-[#4f378b] transition-colors"
+      >
+        <Plus className="w-4 h-4" />
+        Add Formula
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <div className="bg-[#fdfcff] dark:bg-gray-900 rounded-[28px] p-6 w-full max-w-md shadow-xl border border-[#cac4d0] dark:border-gray-700">
+        <h2 className="text-xl font-medium mb-6 text-[#1c1b1f] dark:text-gray-100 flex items-center gap-2">
+          <Brain className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+          Add Quick Formula
+        </h2>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Chapter</label>
+            <select
+              value={selectedChapter}
+              onChange={(e) => setSelectedChapter(e.target.value)}
+              className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] outline-none"
+              required
+            >
+              <option value="">Select a chapter</option>
+              {chapters.map(chapter => (
+                <option key={chapter.id} value={chapter.id}>{chapter.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Formula</label>
+            <input
+              type="text"
+              value={formulaText}
+              onChange={(e) => setFormulaText(e.target.value)}
+              placeholder="e.g., F = ma"
+              className="w-full bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] px-4 py-3 text-[#1c1b1f] dark:text-gray-100 focus:ring-2 focus:ring-[#6750a4] outline-none font-mono"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-[#49454f] dark:text-gray-300 mb-2">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief explanation of the formula..."
+              className="w-full h-20 bg-[#ece6f0] dark:bg-gray-800 border-none rounded-[16px] p-4 resize-none focus:ring-2 focus:ring-[#6750a4] text-[#1c1b1f] dark:text-gray-100 outline-none"
+            />
+          </div>
+          
+          <div className="flex gap-3 mt-6">
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="flex-1 py-3 rounded-full font-medium text-[#49454f] dark:text-gray-300 bg-[#ece6f0] dark:bg-gray-800 hover:bg-[#e8def8] dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-3 rounded-full font-medium text-white bg-[#6750a4] hover:bg-[#4f378b] transition-colors"
+            >
+              Add Formula
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 };
 
@@ -79,6 +303,22 @@ interface MockTest {
   timeErrors?: number;
   notes?: string;
 }
+
+interface StudyTip {
+  id: string;
+  chapterId: string;
+  tip: string;
+  category: 'concept' | 'formula' | 'shortcut' | 'mistake';
+}
+
+interface QuickFormula {
+  id: string;
+  chapterId: string;
+  formula: string;
+  description: string;
+  subject: Subject;
+}
+
 type Subject = 'Physics' | 'Chemistry' | 'Mathematics';
 
 interface Chapter {
@@ -146,7 +386,7 @@ export default function App() {
 
   // --- App State ---
   const [chapters, setChapters] = useState<Chapter[]>(INITIAL_CHAPTERS);
-  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests' | 'path' | 'schedule'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'syllabus' | 'tests' | 'path' | 'schedule' | 'resources'>('plan');
   const [dailyPlan, setDailyPlan] = useState<{date: string, chapterIds: string[]}>({ date: '', chapterIds: [] });
   const [streak, setStreak] = useState<{count: number, lastActivityDate: string}>({ count: 0, lastActivityDate: '' });
   const [mockTests, setMockTests] = useState<MockTest[]>([]);
@@ -158,6 +398,20 @@ export default function App() {
   const [goalScore, setGoalScore] = useState<number>(200);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // New Features State
+  const [studyTips, setStudyTips] = useState<StudyTip[]>([]);
+  const [quickFormulas, setQuickFormulas] = useState<QuickFormula[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<Subject | 'All'>('All');
+  const [achievements, setAchievements] = useState<{id: string, title: string, description: string, unlocked: boolean, icon: string}[]>([
+    { id: 'first_chapter', title: 'First Step', description: 'Complete your first chapter', unlocked: false, icon: '🎯' },
+    { id: 'week_streak', title: 'Week Warrior', description: 'Maintain a 7-day streak', unlocked: false, icon: '🔥' },
+    { id: 'mock_master', title: 'Mock Master', description: 'Complete 10 mock tests', unlocked: false, icon: '🏆' },
+    { id: 'speed_demon', title: 'Speed Demon', description: 'Finish a Pomodoro session with green productivity', unlocked: false, icon: '⚡' },
+    { id: 'revision_king', title: 'Revision King', description: 'Revise 5 chapters', unlocked: false, icon: '👑' },
+  ]);
   
   // Pomodoro State
   const [timerTime, setTimerTime] = useState(25 * 60);
@@ -301,9 +555,13 @@ export default function App() {
   // 2. Save user data whenever chapters change
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, dailySchedule }));
+      localStorage.setItem(`jee_data_${currentUser}`, JSON.stringify({ 
+        chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, 
+        goalScore, savedSessions, workDuration, breakDuration, dailySchedule,
+        studyTips, quickFormulas, achievements 
+      }));
     }
-  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, dailySchedule, currentUser]);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, workDuration, breakDuration, dailySchedule, studyTips, quickFormulas, achievements, currentUser]);
 
   const loadUserData = (user: string) => {
     setIsLoading(true);
@@ -331,6 +589,9 @@ export default function App() {
           setGoalScore(parsed.goalScore || 200);
           setSavedSessions(parsed.savedSessions || []);
           setDailySchedule(parsed.dailySchedule || { date: '', tasks: [] });
+          setStudyTips(parsed.studyTips || []);
+          setQuickFormulas(parsed.quickFormulas || []);
+          if (parsed.achievements) setAchievements(parsed.achievements);
           if (parsed.workDuration) setWorkDuration(parsed.workDuration);
           if (parsed.breakDuration) setBreakDuration(parsed.breakDuration);
         }
@@ -543,6 +804,23 @@ export default function App() {
 
   const daysToTarget = Math.ceil((targetDate.getTime() - todayDateObj.getTime()) / (1000 * 3600 * 24));
   const daysToExam = Math.ceil((examDate.getTime() - todayDateObj.getTime()) / (1000 * 3600 * 24));
+
+  // Check achievements on load
+  useEffect(() => {
+    // Week streak achievement
+    if (streak.count >= 7) {
+      setAchievements(prev => prev.map(a => 
+        a.id === 'week_streak' ? { ...a, unlocked: true } : a
+      ));
+    }
+    
+    // Mock master achievement
+    if (mockTests.length >= 10) {
+      setAchievements(prev => prev.map(a => 
+        a.id === 'mock_master' ? { ...a, unlocked: true } : a
+      ));
+    }
+  }, [streak.count, mockTests.length]);
 
   // --- Derived State & Logic ---
   const quotes = [
@@ -852,6 +1130,13 @@ export default function App() {
     setDistractionNotes('');
     setSessionProductivity('green');
     setPendingSessionLog(null);
+    
+    // Unlock speed demon achievement for green productivity
+    if (sessionProductivity === 'green') {
+      setAchievements(prev => prev.map(a => 
+        a.id === 'speed_demon' ? { ...a, unlocked: true } : a
+      ));
+    }
   }, [pendingSessionLog, progressNotes, distractionNotes, sessionProductivity]);
 
   // 5. Backlog Manager
@@ -923,6 +1208,11 @@ export default function App() {
       }
     });
 
+    // Unlock first achievement
+    setAchievements(prev => prev.map(a => 
+      a.id === 'first_chapter' ? { ...a, unlocked: true } : a
+    ));
+
     setChapterToRate(null);
   };
 
@@ -936,7 +1226,70 @@ export default function App() {
     setChapters(prev => prev.map(c => 
       c.id === id ? { ...c, revisionCount: (c.revisionCount || 0) + 1, lastRevised: todayStr } : c
     ));
-  }, [todayStr]);
+    
+    // Check for revision king achievement
+    const revisedCount = chapters.filter(c => c.revisionCount && c.revisionCount > 0).length;
+    if (revisedCount >= 5) {
+      setAchievements(prev => prev.map(a => 
+        a.id === 'revision_king' ? { ...a, unlocked: true } : a
+      ));
+    }
+  }, [todayStr, chapters]);
+
+  // New Feature Handlers
+  const addStudyTip = useCallback((chapterId: string, tip: string, category: StudyTip['category']) => {
+    setStudyTips(prev => [...prev, { id: Date.now().toString(), chapterId, tip, category }]);
+  }, []);
+
+  const removeStudyTip = useCallback((tipId: string) => {
+    setStudyTips(prev => prev.filter(t => t.id !== tipId));
+  }, []);
+
+  const addQuickFormula = useCallback((chapterId: string, formula: string, description: string, subject: Subject) => {
+    setQuickFormulas(prev => [...prev, { id: Date.now().toString(), chapterId, formula, description, subject }]);
+  }, []);
+
+  const removeQuickFormula = useCallback((formulaId: string) => {
+    setQuickFormulas(prev => prev.filter(f => f.id !== formulaId));
+  }, []);
+
+  const exportData = useCallback(() => {
+    const data = { chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, studyTips, quickFormulas, achievements };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jee-backup-${currentUser}-${todayStr}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [chapters, dailyPlan, streak, mockTests, activityLog, dailyBig3, goalScore, savedSessions, studyTips, quickFormulas, achievements, currentUser, todayStr]);
+
+  const importData = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string);
+        if (data.chapters) setChapters(data.chapters);
+        if (data.dailyPlan) setDailyPlan(data.dailyPlan);
+        if (data.streak) setStreak(data.streak);
+        if (data.mockTests) setMockTests(data.mockTests);
+        if (data.activityLog) setActivityLog(data.activityLog);
+        if (data.dailyBig3) setDailyBig3(data.dailyBig3);
+        if (data.goalScore) setGoalScore(data.goalScore);
+        if (data.savedSessions) setSavedSessions(data.savedSessions);
+        if (data.studyTips) setStudyTips(data.studyTips);
+        if (data.quickFormulas) setQuickFormulas(data.quickFormulas);
+        if (data.achievements) setAchievements(data.achievements);
+        alert('Data imported successfully!');
+      } catch (err) {
+        alert('Failed to import data. Please check the file format.');
+      }
+    };
+    reader.readAsText(file);
+  }, []);
 
   // --- Render Helpers ---
   const getSubjectColor = (subject: Subject) => {
@@ -1138,6 +1491,15 @@ export default function App() {
           >
             <Activity className="w-4 h-4" />
             Mock Tests
+          </button>
+          <button
+            onClick={() => setActiveTab('resources')}
+            className={`flex-none px-6 py-2.5 text-sm font-medium rounded-full transition-colors flex items-center gap-2 ${
+              activeTab === 'resources' ? 'bg-[#eaddff] text-[#21005d] dark:bg-purple-900/80 dark:text-purple-200' : 'bg-transparent border border-[#79747e] text-[#49454f] dark:text-gray-300 dark:border-gray-600 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+            }`}
+          >
+            <Trophy className="w-4 h-4" />
+            Resources
           </button>
           <button
             onClick={() => setActiveTab('path')}
@@ -2039,6 +2401,178 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'resources' && (
+          <div className="space-y-6">
+            {/* Achievements Section */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f] dark:text-gray-100">
+                <Trophy className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                Achievements
+              </h2>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {achievements.map(achievement => (
+                  <div 
+                    key={achievement.id} 
+                    className={`rounded-[24px] p-5 border transition-all duration-300 ${
+                      achievement.unlocked 
+                        ? 'bg-gradient-to-br from-[#eaddff] to-[#f3edf7] dark:from-purple-900/50 dark:to-gray-800 border-[#6750a4] dark:border-purple-500 shadow-md' 
+                        : 'bg-[#fdfcff] dark:bg-gray-900 border-[#cac4d0] dark:border-gray-700 opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className={`text-4xl ${!achievement.unlocked && 'grayscale'}`}>
+                        {achievement.icon}
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-medium text-[#1c1b1f] dark:text-gray-100 mb-1">{achievement.title}</h3>
+                        <p className="text-sm text-[#49454f] dark:text-gray-400">{achievement.description}</p>
+                        {achievement.unlocked && (
+                          <span className="inline-block mt-2 text-xs font-medium text-[#6750a4] dark:text-purple-400 bg-[#eaddff] dark:bg-purple-900/50 px-2 py-1 rounded-full">
+                            ✓ Unlocked
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Study Tips Section */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f] dark:text-gray-100">
+                  <Lightbulb className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                  Study Tips & Tricks
+                </h2>
+                <AddTipForm chapters={chapters} onAdd={addStudyTip} />
+              </div>
+              
+              {studyTips.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {studyTips.map(tip => {
+                    const chapter = chapters.find(c => c.id === tip.chapterId);
+                    return (
+                      <div key={tip.id} className="bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] p-5 shadow-sm border border-[#cac4d0] dark:border-gray-700 transition-colors duration-300">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                              tip.category === 'concept' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                              tip.category === 'formula' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                              tip.category === 'shortcut' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                              'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                            }`}>
+                              {tip.category}
+                            </span>
+                            {chapter && (
+                              <span className="text-xs font-medium text-[#49454f] dark:text-gray-400">{chapter.name}</span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => removeStudyTip(tip.id)}
+                            className="p-1 text-[#ba1a1a] dark:text-red-400 hover:bg-[#ffdad6] dark:hover:bg-red-900/50 rounded-full transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <p className="text-sm text-[#1c1b1f] dark:text-gray-100">{tip.tip}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-[#49454f] dark:text-gray-400">
+                  <Lightbulb className="w-12 h-12 mx-auto mb-3 text-[#cac4d0] dark:text-gray-600" />
+                  <p>No study tips yet.</p>
+                  <p className="text-sm">Add your own tips and tricks for each chapter.</p>
+                </div>
+              )}
+            </section>
+
+            {/* Quick Formulas Section */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <h2 className="text-lg font-medium flex items-center gap-2 text-[#1c1b1f] dark:text-gray-100">
+                  <Brain className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                  Quick Formulas
+                </h2>
+                <AddFormulaForm chapters={chapters} onAdd={addQuickFormula} />
+              </div>
+              
+              {quickFormulas.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {quickFormulas.map(formula => {
+                    const chapter = chapters.find(c => c.id === formula.chapterId);
+                    return (
+                      <div key={formula.id} className="bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] p-5 shadow-sm border border-[#cac4d0] dark:border-gray-700 transition-colors duration-300">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                              formula.subject === 'Physics' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                              formula.subject === 'Chemistry' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                              'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                            }`}>
+                              {formula.subject}
+                            </span>
+                            {chapter && (
+                              <span className="text-xs font-medium text-[#49454f] dark:text-gray-400">{chapter.name}</span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => removeQuickFormula(formula.id)}
+                            className="p-1 text-[#ba1a1a] dark:text-red-400 hover:bg-[#ffdad6] dark:hover:bg-red-900/50 rounded-full transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <p className="text-sm font-mono text-[#6750a4] dark:text-purple-400 mb-2 bg-[#ece6f0] dark:bg-gray-800 px-3 py-2 rounded-lg">{formula.formula}</p>
+                        <p className="text-sm text-[#49454f] dark:text-gray-400">{formula.description}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-[#49454f] dark:text-gray-400">
+                  <Brain className="w-12 h-12 mx-auto mb-3 text-[#cac4d0] dark:text-gray-600" />
+                  <p>No quick formulas yet.</p>
+                  <p className="text-sm">Save important formulas for quick revision.</p>
+                </div>
+              )}
+            </section>
+
+            {/* Data Management Section */}
+            <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
+              <h2 className="text-lg font-medium flex items-center gap-2 mb-6 text-[#1c1b1f] dark:text-gray-100">
+                <Settings className="w-6 h-6 text-[#6750a4] dark:text-purple-400" />
+                Data Management
+              </h2>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button
+                  onClick={exportData}
+                  className="flex items-center justify-center gap-3 p-5 bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] border border-[#cac4d0] dark:border-gray-700 hover:bg-[#eaddff] dark:hover:bg-purple-900/30 transition-colors group"
+                >
+                  <Download className="w-6 h-6 text-[#6750a4] dark:text-purple-400 group-hover:scale-110 transition-transform" />
+                  <div className="text-left">
+                    <p className="font-medium text-[#1c1b1f] dark:text-gray-100">Export Data</p>
+                    <p className="text-xs text-[#49454f] dark:text-gray-400">Backup your progress</p>
+                  </div>
+                </button>
+                
+                <label className="flex items-center justify-center gap-3 p-5 bg-[#fdfcff] dark:bg-gray-900 rounded-[24px] border border-[#cac4d0] dark:border-gray-700 hover:bg-[#eaddff] dark:hover:bg-purple-900/30 transition-colors group cursor-pointer">
+                  <Upload className="w-6 h-6 text-[#6750a4] dark:text-purple-400 group-hover:scale-110 transition-transform" />
+                  <div className="text-left">
+                    <p className="font-medium text-[#1c1b1f] dark:text-gray-100">Import Data</p>
+                    <p className="text-xs text-[#49454f] dark:text-gray-400">Restore from backup</p>
+                  </div>
+                  <input type="file" accept=".json" onChange={importData} className="hidden" />
+                </label>
+              </div>
+            </section>
+          </div>
+        )}
+
         {activeTab === 'path' && (
           <div className="space-y-6">
             <section className="bg-[#f3edf7] dark:bg-gray-800 rounded-[28px] p-6 transition-colors duration-300">
@@ -2151,6 +2685,17 @@ export default function App() {
             <Activity className="w-6 h-6" />
           </div>
           <span className="text-[10px] font-medium">Tests</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('resources')}
+          className={`flex flex-col items-center p-2 min-w-[64px] rounded-xl transition-colors ${
+            activeTab === 'resources' ? 'text-[#21005d] dark:text-purple-300' : 'text-[#49454f] dark:text-gray-400 hover:bg-[#ece6f0] dark:hover:bg-gray-800'
+          }`}
+        >
+          <div className={`px-4 py-1 rounded-full mb-1 transition-colors ${activeTab === 'resources' ? 'bg-[#eaddff] dark:bg-purple-900/80' : 'bg-transparent'}`}>
+            <Trophy className="w-6 h-6" />
+          </div>
+          <span className="text-[10px] font-medium">Resources</span>
         </button>
         <button
           onClick={() => setActiveTab('path')}
